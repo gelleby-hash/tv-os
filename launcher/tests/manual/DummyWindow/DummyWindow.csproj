@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Manual check only, not in TvLauncher.sln and never shipped: a harmless window with a unique
+       process name, so the check can steal focus from it and CloseAll it without touching anything else. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TvosDummyWindow</AssemblyName>
+  </PropertyGroup>
+
+</Project>

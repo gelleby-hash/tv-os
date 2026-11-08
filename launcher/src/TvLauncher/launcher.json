@@ -1,0 +1,95 @@
+{
+  "Apps": [
+    {
+      "Id": "youtube",
+      "Name": "YouTube",
+      "Url": "https://www.youtube.com/tv",
+      "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Cobalt/27.lts.3.1040976-gold (unlike Gecko) v8/13.8.258.54-jit gles Starboard/18, TvLauncher_DESKTOP_x8664_2026/1.0 (TvLauncher, Windows) com.tvos.launcher/1.0",
+      "BrowserArgs": "",
+      "Back": "Page",
+      "DirectPauseFallback": true,
+      "PhoneMic": true,
+      "Icon": "icons/youtube.svg"
+    },
+    {
+      "Id": "disney",
+      "Name": "Disney+",
+      "Url": "https://www.disneyplus.com",
+      "BrowserArgs": "--enable-spatial-navigation --autoplay-policy=no-user-gesture-required",
+      "BoostGain": 4,
+      "Back": "History",
+      "DirectPauseFallback": false,
+      "ArrowNav": true,
+      "Icon": "icons/disney.svg"
+    },
+    {
+      "Id": "channel4",
+      "Name": "Channel 4",
+      "Icon": "icons/channel4-tv.svg",
+      "Versions": [
+        {
+          "Id": "tv",
+          "Name": "TV",
+          "Url": "https://freeview.bsd.client.streaming.channel4.com/rc-26.3.0/index.html?device=google",
+          "UserAgent": "Mozilla/5.0 (Linux; Android 12; Chromecast Build/STTL.240508.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/128.0.6613.146 Mobile Safari/537.36 WebAppWrapper/1.0.1 (Google TV; Channel 4; google; ; )",
+          "BrowserArgs": "",
+          "Back": "Page",
+          "DirectPauseFallback": false,
+          "ExitWhenEmpty": "appRoot",
+          "Icon": "icons/channel4-tv.svg"
+        },
+        {
+          "Id": "web",
+          "Name": "Website",
+          "Url": "https://www.channel4.com",
+          "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+          "BrowserArgs": "--enable-spatial-navigation",
+          "Back": "History",
+          "DirectPauseFallback": false,
+          "HidePlayReady": true,
+          "ArrowNav": true,
+          "PauseButton": "Pause",
+          "Icon": "icons/channel4-web.svg"
+        }
+      ]
+    },
+    {
+      "Id": "netflix",
+      "Name": "Netflix",
+      "Url": "https://www.netflix.com",
+      "Icon": "icons/netflix.svg"
+    },
+    {
+      "Id": "prime",
+      "Name": "Prime Video",
+      "Url": "https://www.primevideo.com",
+      "BrowserArgs": "--enable-spatial-navigation",
+      "ArrowNav": true,
+      "HideElements": "[data-testid=\"critical-notification\"]:has(a[href*=\"privacyprefs\"])",
+      "Icon": "icons/prime.svg"
+    },
+    {
+      "Id": "plex",
+      "Name": "Plex",
+      "Url": "https://app.plex.tv/desktop",
+      "BrowserArgs": "--enable-spatial-navigation",
+      "DirectPauseFallback": true,
+      "ArrowNav": true,
+      "Icon": "icons/plex.svg"
+    }
+  ],
+  "HomeKeyVk": 172,
+  "BackKeyVk": 166,
+  "SwallowKeyVks": [170, 93],
+  "RequireHdr": true,
+  "PhoneRemote": { "Enabled": false, "Port": 47800 },
+  "Locale": "en-GB",
+  "Unit": "C",
+  "Clock": "24",
+  "BackgroundRotateSeconds": 60,
+  "SpotlightFolders": [
+    "%LOCALAPPDATA%\\Packages\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\LocalCache\\Microsoft\\IrisService",
+    "%LOCALAPPDATA%\\Packages\\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\\LocalState\\Assets"
+  ],
+  "LogPath": "%LOCALAPPDATA%\\TvLauncher\\launcher.log"
+}

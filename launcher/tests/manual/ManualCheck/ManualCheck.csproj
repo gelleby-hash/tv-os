@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Manual dev-PC check of KeyboardHook and Win32WindowSystem.Activate. Not in
+       TvLauncher.sln and never shipped. Run it by hand: see the comment at the top of Program.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TvLauncher.ManualCheck</AssemblyName>
+    <!-- TvLauncher is a self-contained exe; this harness only borrows its classes. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\TvLauncher\TvLauncher.csproj" />
+  </ItemGroup>
+
+</Project>

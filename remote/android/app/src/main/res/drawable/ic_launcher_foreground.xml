@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon: a small black remote with a D-pad, three buttons (Home in blue) and a volume key. It stays inside
+     the adaptive icon's central 66 by 66 safe zone, so no launcher's mask cuts it off. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Body: 30 wide, 62 tall, fully rounded ends. -->
+    <path
+        android:fillColor="#FF1B1C20"
+        android:pathData="M39,38 A15,15 0 0,1 69,38 L69,70 A15,15 0 0,1 39,70 Z" />
+    <!-- D-pad ring and its OK button. -->
+    <path
+        android:fillColor="#FF34373E"
+        android:pathData="M44,44.8 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0 Z" />
+    <path
+        android:fillColor="#FF1B1C20"
+        android:pathData="M49.8,44.8 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0 Z" />
+    <!-- Back, Home (blue), play/pause. -->
+    <path
+        android:fillColor="#FF5B5F68"
+        android:pathData="M44.45,63.2 a2.85,2.85 0 1,0 5.7,0 a2.85,2.85 0 1,0 -5.7,0 Z M57.85,63.2 a2.85,2.85 0 1,0 5.7,0 a2.85,2.85 0 1,0 -5.7,0 Z" />
+    <path
+        android:fillColor="#FF4AA8FF"
+        android:pathData="M51.15,63.2 a2.85,2.85 0 1,0 5.7,0 a2.85,2.85 0 1,0 -5.7,0 Z" />
+    <!-- Volume key. -->
+    <path
+        android:fillColor="#FF5B5F68"
+        android:pathData="M50.65,68.3 L57.35,68.3 A2.5,2.5 0 0,1 57.35,73.3 L50.65,73.3 A2.5,2.5 0 0,1 50.65,68.3 Z" />
+</vector>

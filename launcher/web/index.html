@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920, user-scalable=no">
+  <title>Home</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="sky" width="1920" height="1080"></canvas>
+    <div id="landscape" aria-hidden="true">
+      <div class="landscape-layer"></div>
+      <div class="landscape-layer"></div>
+      <div class="landscape-haze"></div>
+      <div class="photo-layer"></div>
+      <div class="photo-layer"></div>
+    </div>
+    <canvas id="precip" width="1920" height="1080"></canvas>
+    <div class="flash" id="flash"></div>
+    <div class="scrim" id="scrim"></div>
+
+    <main id="home" class="scope">
+      <header class="topbar">
+        <nav class="actions">
+          <button class="icon-btn focusable" data-action="apps" data-icon="apps" aria-label="Apps"></button>
+          <button class="icon-btn focusable" data-action="ambient" data-icon="image" aria-label="Picture mode"></button>
+          <button class="icon-btn focusable sep" data-action="boost" data-icon="volume" aria-label="Boost"></button>
+          <button class="icon-btn focusable" data-action="desktop" data-icon="desktop" aria-label="Windows desktop"></button>
+          <button class="icon-btn focusable" data-action="restart" data-icon="restart" aria-label="Restart the TV box"></button>
+          <button class="icon-btn focusable" data-action="shutdown" data-icon="power" aria-label="Shut down the TV box"></button>
+        </nav>
+        <div class="divider"></div>
+        <div class="clock" id="clock"></div>
+      </header>
+
+      <section class="hero">
+        <div class="greeting">
+          <div class="date" id="date"></div>
+          <h1 id="greet"></h1>
+        </div>
+        <div class="side">
+          <button class="weather-off focusable" id="weatherOff" data-action="locAsk" hidden>Weather off</button>
+          <div class="weather focusable" id="weather" data-action="forecast">
+            <svg class="stars" id="wxStars" viewBox="0 0 600 260" preserveAspectRatio="xMidYMin slice" aria-hidden="true" hidden></svg>
+            <div class="wx-main">
+              <div class="wx-icon" id="wxIcon"></div>
+              <div class="wx-temp" id="wxTemp">--°</div>
+              <div class="wx-text">
+                <div class="wx-cond" id="wxCond">Loading weather…</div>
+                <div class="wx-hilo" id="wxHilo"></div>
+              </div>
+            </div>
+            <div class="wx-details" id="wxDetails"></div>
+            <div class="wx-hours" id="wxHours"></div>
+          </div>
+          <div class="wx-note">
+            <p class="sub" id="sub"></p>
+            <p class="sun" id="sunline"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="apps">
+        <div class="grid-viewport"><div class="grid" id="grid"></div></div>
+        <svg class="more chev-before" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        <svg class="more chev-after" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+      </section>
+    </main>
+
+    <section id="forecast" class="overlay scope" hidden>
+      <div class="panel forecast-panel">
+        <svg class="stars" id="fcStars" viewBox="0 0 1520 900" preserveAspectRatio="xMidYMin slice" aria-hidden="true" hidden></svg>
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow" id="fcPlace"></div>
+            <h3>7-day forecast</h3>
+          </div>
+          <div class="panel-actions">
+            <button class="pill-btn focusable" data-action="locAsk">Change location</button>
+            <button class="pill-btn focusable" data-action="close">Close</button>
+          </div>
+        </div>
+        <div class="fc-days" id="fcDays"></div>
+        <div class="fc-tiles" id="fcTiles"></div>
+      </div>
+    </section>
+
+    <section id="apps" class="overlay scope" hidden>
+      <div class="panel apps-panel">
+        <h3>Apps</h3>
+        <div class="app-rows" id="appsList"></div>
+      </div>
+    </section>
+
+    <section id="confirm" class="overlay scope" hidden>
+      <div class="panel confirm-panel">
+        <h3 id="confirmText"></h3>
+        <div class="confirm-actions">
+          <button class="pill-btn focusable" data-action="confirm-no">No</button>
+          <button class="pill-btn focusable" data-action="confirm-yes">Yes</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- The weather's place: the pop-up, then the countries, then the letters. Back on screen and on the remote steps back one. -->
+    <section id="locAsk" class="overlay scope" hidden>
+      <div class="panel loc-panel">
+        <h3>Show the weather?</h3>
+        <p class="loc-note" id="locNote" hidden>Windows location is still off.</p>
+        <div class="loc-choices">
+          <button class="pill-btn focusable" data-action="locTurnOn" hidden><span>Turn on Windows location</span><small>Opens Windows settings: turn on Location services and Let apps access your location, then press Home.</small></button>
+          <button class="pill-btn focusable" data-action="locChoose">Choose a place</button>
+          <button class="pill-btn focusable" data-action="locOff">Continue without weather</button>
+          <button class="pill-btn focusable" data-action="locWindows" hidden>Use Windows location</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="locCountry" class="overlay scope" hidden>
+      <div class="panel loc-list-panel">
+        <div class="panel-head">
+          <h3>Choose a country</h3>
+          <button class="pill-btn focusable" data-action="locBack">Back</button>
+        </div>
+        <div class="loc-list" id="locCountries"></div>
+      </div>
+    </section>
+
+    <section id="locSearch" class="overlay scope" hidden>
+      <div class="panel loc-search-panel">
+        <div class="panel-head loc-head">
+          <div class="loc-field"><span class="loc-text" id="locText"></span><span class="loc-hint" id="locHint">Type a town</span></div>
+          <button class="pill-btn focusable" data-action="locBack">Back</button>
+        </div>
+        <div class="loc-keys" id="locKeys"></div>
+        <div class="loc-results">
+          <div id="locResults"></div>
+          <p class="loc-status" id="locStatus"></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="ambient" class="ambient scope" hidden>
+      <div class="amb-time" id="ambTime"></div>
+      <div class="amb-date" id="ambDate"></div>
+      <div class="amb-wx" id="ambWx"></div>
+      <button class="focusable amb-exit" data-action="close" aria-label="Exit ambient mode"></button>
+    </section>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="js/host.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/moon.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/sky.js"></script>
+  <script src="js/landscape.js"></script>
+  <script src="js/background.js"></script>
+  <script src="js/apps.js"></script>
+  <script src="js/places.js"></script>
+  <script src="js/appspanel.js"></script>
+  <script src="js/row.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

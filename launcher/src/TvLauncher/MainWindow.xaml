@@ -1,0 +1,24 @@
+<Window x:Class="TvLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TV launcher"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="0"
+        Top="0"
+        WindowState="Maximized"
+        Background="Black">
+    <Grid x:Name="Root">
+        <TextBlock x:Name="Message"
+                   Visibility="Collapsed"
+                   Foreground="White"
+                   FontSize="96"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
+    </Grid>
+</Window>

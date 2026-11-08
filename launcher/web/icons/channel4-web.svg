@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Channel 4 logo from Wikimedia Commons, File:Channel_4_2022.svg (public domain, downloaded 2026-11-02). Recoloured from black to white for the launcher's dark glass tiles and the Inkscape editor metadata removed; the shapes are unchanged. A trademark of Channel Four Television Corporation. -->
+<svg viewBox="0 0 177.593 240" width="177.593" height="240" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <g fill="#ffffff">
+    <path d="M 99.4164,170.738 H 76.791 V 240 h 22.6254 z" />
+    <path d="M 160.438,217.375 H 109.469 V 240 h 50.969 z" />
+    <path d="m 177.593,138.061 h -35.447 v 22.625 h 35.447 z" />
+    <path d="M 66.7397,217.375 H 44.1143 V 240 h 22.6254 z" />
+    <path d="M 66.7399,89.436 V 53.4556 L 6.39355,128.009 H 35.5189 Z" />
+    <path d="M 76.791,128.01 H 99.4164 V 13.2842 L 76.791,41.0598 Z" />
+    <path d="M 132.094,31.7539 109.469,59.6716 V 207.394 h 22.625 z" />
+    <path d="M 99.4169,138.061 H 0 v 22.625 h 99.4169 z" />
+    <path d="m 112.63,0 -3.161,3.90706 V 43.7235 l 22.625,-27.9532 z" />
+  </g>
+</svg>

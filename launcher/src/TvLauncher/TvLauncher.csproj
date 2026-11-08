@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <AssemblyName>TvLauncher</AssemblyName>
+    <RootNamespace>TvLauncher</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="[1.0.4314.35]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="launcher.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The home page, served to WebView2 as https://tvhome.test/ from <exe folder>\web. tools\ holds its node tests only. -->
+    <Content Include="..\..\web\**\*" Exclude="..\..\web\tools\**" LinkBase="web" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TvLauncher.Tests" />
+    <InternalsVisibleTo Include="TvLauncher.ManualCheck" />
+  </ItemGroup>
+
+</Project>
