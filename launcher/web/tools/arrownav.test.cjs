@@ -47,10 +47,18 @@ class El {
     return (t === 'A' && ('href' in a || 'data-testid' in a)) || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(t)
       || ['button', 'tab', 'link'].includes(a.role) || ('tabindex' in a && String(a.tabindex) !== '-1');
   }
-  querySelectorAll() { const out = []; const walk = (e) => { for (const k of e.children) { if (k.picked()) out.push(k); walk(k); } }; walk(this); return out; }
-  focus(opts) { page.document.activeElement = this; this.focusOpts = opts; }
-  // Records what the script sends it, as type@x,y.
-  dispatchEvent(e) { (this.events = this.events || []).push(e.type + '@' + e.clientX + ',' + e.clientY); return true; }
+  // The script's item selector, or 'video'.
+  querySelectorAll(sel) {
+    const want = sel === 'video' ? (k) => k.tagName === 'VIDEO' : (k) => k.picked();
+    const out = []; const walk = (e) => { for (const k of e.children) { if (want(k)) out.push(k); walk(k); } }; walk(this); return out;
+  }
+  // As in a browser, only an item, or an element with a tabindex (even -1), takes the focus.
+  focus(opts) {
+    if (!this.picked() && !this.hasAttribute('tabindex')) return;
+    page.document.activeElement = this; this.focusOpts = opts;
+  }
+  // Records what the script sends it: a pointer as type@x,y, a key as type:key.
+  dispatchEvent(e) { (this.events = this.events || []).push(e.key !== undefined ? e.type + ':' + e.key : e.type + '@' + e.clientX + ',' + e.clientY); return true; }
   scrollIntoView(opts) { this.scrolled = opts; }
 }
 
@@ -109,7 +117,35 @@ function homePage({ pathname = '/en-gb/home', carousel = false } = {}) {
   const c4 = { box: carouselBox, tiles: slides.map(s => s.children[0]) };
   body.add(bar, heroBox, top.scroller, low.scroller);
   if (carousel) body.add(carouselBox);
+  return run(doc, pathname, { home, search, pill, hero, heroArrow, top, low, c4 });
+}
 
+// Prime Video's title page as measured on 2026-11-14 (1920 x 1080): a channel logo link stretched across the page, a
+// row of round buttons, Play, and the synopsis (a span with tabindex 0) to the right of Play and below it.
+function titlePage() {
+  const body = new El('body');
+  const doc = { body, documentElement: new El('html'), activeElement: body, fullscreenElement: null, querySelectorAll: (s) => body.querySelectorAll(s),
+    elementFromPoint: () => body };
+  doc.documentElement.add(body);
+  const logo = new El('a', { 'data-testid': 'channelLogo-link', 'aria-label': 'Logo' }, [72, 80, 1776, 35]);
+  const trailer = new El('a', { href: '/trailer', 'aria-label': 'Watch trailer' }, [72, 684, 48, 48]);
+  const like = new El('button', { 'aria-label': 'Like' }, [192, 684, 48, 48]);
+  const play = new El('a', { href: '/play', role: 'button', 'aria-label': 'Play' }, [72, 748, 348, 62]);
+  const adFree = new El('a', { href: '/adfree', 'aria-label': 'Go ad free' }, [72, 824, 348, 62]);
+  const synopsis = new El('span', { tabindex: 0, 'aria-label': 'Synopsis' }, [448, 815, 950, 75]);
+  body.add(logo, trailer, like, play, adFree, synopsis);
+  // The player, there all along and shown over the page while a video plays: a fixed layer that takes the focus
+  // (tabindex -1), the video filling it, and an element inside that Prime focuses when it opens the player itself.
+  const layer = new El('div', { id: 'dv-web-player', tabindex: -1 }, [0, 0, 0, 0], { position: 'fixed', display: 'none' });
+  const video = new El('video', {}, [0, 0, 0, 0], { position: 'absolute' });
+  const inside = new El('div', { tabindex: -1, 'aria-label': 'Rating' }, [0, 0, 0, 0]);
+  body.add(layer.add(video, inside));
+  const p = run(doc, '/detail/0FKWLNTAYMFTSZ7TRZSPLG84NM', { logo, trailer, play, synopsis, layer, video, inside });
+  p.showPlayer = () => { layer.style.display = 'block'; layer.rect = video.rect = [0, 0, 1920, 1080]; };
+  return p;
+}
+
+function run(doc, pathname, parts) {
   const handlers = [];
   const warnings = [];
   const ctx = vm.createContext({
@@ -120,11 +156,12 @@ function homePage({ pathname = '/en-gb/home', carousel = false } = {}) {
     innerHeight: 1080,
     getComputedStyle: (e) => e.style,
     MouseEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+    KeyboardEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     PointerEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     console: { warn: (...a) => warnings.push(a) },
     Math,
   });
-  page = { document: doc, handlers, warnings, home, search, pill, hero, heroArrow, top, low, c4 };
+  page = Object.assign({ document: doc, handlers, warnings }, parts);
   vm.runInContext(script, ctx, { filename: 'ArrowNav' });
   return page;
 }
@@ -328,4 +365,64 @@ test('arrows: away from the player no pointer move is made', () => {
   press(p, 'ArrowRight');
   press(p, 'Enter');
   assert.equal(p.document.body.events, undefined);
+});
+
+test('arrows: Down from an item stretched across the page goes to the nearest item below, not the one under its middle', () => {
+  const p = titlePage();
+  p.logo.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Like', 'the row of buttons, the nearest below; not the synopsis under the middle of the logo link');
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Play');
+});
+
+// Prime Video plays in a layer fixed over its title page, at the same address (measured 2026-11-14): the arrows took
+// focus to the cast links behind the video, and the player never saw them.
+test('arrows: a video filling the screen in a fixed layer is the player, which keeps its keys', () => {
+  const p = titlePage();
+  p.showPlayer();
+  p.inside.focus();
+  const ev = press(p, 'ArrowRight');
+  assert.equal(ev.prevented || ev.stopped, false, 'Right goes on to the player');
+  assert.equal(focused(p), 'Rating', 'and focus stays where it was, inside the player');
+  assert.ok((p.document.body.events || []).some(m => m.startsWith('mousemove@')), 'a pointer nudge, as in any player');
+});
+
+// Prime's player listens for keys only with the focus inside it. Started by loading a play address (?autoplay=1) the
+// focus stays on the page body, so Space, the remote's OK and the launcher's own pause press on Home all reached
+// nothing, and the video played on behind the home screen (measured 2026-11-14). Prime takes a key a script sends.
+test('arrows: a key while the focus is outside the player layer moves the focus into it and goes to the player there', () => {
+  const p = titlePage();
+  p.showPlayer();
+  for (const key of [' ', 'Enter', 'ArrowRight']) {
+    p.document.activeElement = p.document.body;
+    const ev = press(p, key);
+    assert.ok(ev.prevented && ev.stopped, key + ': the copy on the body goes no further');
+    assert.equal(p.document.activeElement, p.layer, key + ': the focus is in the player now');
+    assert.equal(p.layer.events.at(-1), 'keydown:' + key, key + ': the player gets the key');
+  }
+  assert.equal(p.layer.focusOpts.preventScroll, true);
+});
+
+test('arrows: a player layer that cannot take the focus is left alone, and the key goes on as before', () => {
+  const p = titlePage();
+  delete p.layer.attrs.tabindex;
+  p.showPlayer();
+  const ev = press(p, ' ');
+  assert.equal(ev.prevented || ev.stopped, false);
+  assert.equal(p.document.activeElement, p.document.body);
+  assert.equal(p.layer.events, undefined);
+});
+
+test('arrows: a video that is hidden, or not fixed over the page (a trailer on a home page), is not the player', () => {
+  const p = titlePage();
+  p.trailer.focus();
+  assert.ok(press(p, 'ArrowDown').prevented, 'the player layer is there but hidden');
+  assert.equal(focused(p), 'Play');
+  p.layer.style.position = 'static';
+  p.layer.style.display = 'block';
+  p.layer.rect = p.video.rect = [0, 0, 1920, 1080];
+  p.video.style.position = 'static';
+  assert.ok(press(p, 'ArrowUp').prevented, 'a big video in the page itself');
+  assert.equal(focused(p), 'Like', 'the button over the middle of Play');
 });

@@ -205,8 +205,14 @@ internal static class PageScripts
               // Left and Right stay in the row; Up and Down only go to what is on screen across.
               if (d[0] !== 0 && (r.bottom <= c.top || r.top >= c.bottom)) continue;
               if (d[1] !== 0 && (r.right <= 0 || r.left >= innerWidth)) continue;
-              const side = d[0] !== 0 ? Math.abs(r.top + r.height / 2 - cy) : Math.abs(r.left + r.width / 2 - cx);
-              found.push({ e, score: Math.max(ahead, 0) + side * 2 });
+              // How far off to the side: from its centre to the nearest edge of the current item, none when it lies
+              // across from it, so from an item stretched across the page the nearest one ahead wins (Prime Video's
+              // title page, 2026-11-14: its logo link spans the page, and the synopsis under its middle beat Play).
+              // How far apart the centres are only breaks ties.
+              const mid = d[0] !== 0 ? r.top + r.height / 2 : r.left + r.width / 2;
+              const off = d[0] !== 0 ? Math.max(c.top - mid, mid - c.bottom, 0) : Math.max(c.left - mid, mid - c.right, 0);
+              const centres = Math.abs(mid - (d[0] !== 0 ? cy : cx));
+              found.push({ e, score: Math.max(ahead, 0) + off * 2 + centres / 10 });
             }
             return rank(found, pinned(cur), d[0] !== 0);
           };
@@ -235,8 +241,38 @@ internal static class PageScripts
             } catch (e) { console.warn('tv nudge', e); }
           };
 
+          // A video filling the screen inside a layer fixed over the page: a player that keeps the page's address
+          // (Prime Video plays over its title page, 2026-11-14). Returns that layer. A trailer in the page itself is
+          // not fixed, and the hidden layer measures nothing.
+          const playerLayer = () => {
+            for (const v of document.querySelectorAll('video')) {
+              const r = v.getBoundingClientRect();
+              if (r.width < innerWidth * 0.9 || r.height < innerHeight * 0.9) continue;
+              for (let p = v; p; p = p.parentElement) if (getComputedStyle(p).position === 'fixed') return p;
+            }
+            return null;
+          };
+
+          // Prime's player listens for keys only with the focus inside it, and started from a play address the focus
+          // stays on the page, so the remote's keys and the launcher's pause press reached nothing (2026-11-14). The
+          // focus goes into the layer, and the key with it: Prime takes a key a script sends (measured).
+          const intoPlayer = (layer, ev) => {
+            if (layer.contains(deep())) return;
+            layer.focus({ preventScroll: true });
+            if (document.activeElement !== layer) return;
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            layer.dispatchEvent(new KeyboardEvent('keydown', { key: ev.key, code: ev.code, keyCode: ev.keyCode, which: ev.which,
+              altKey: ev.altKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, shiftKey: ev.shiftKey, bubbles: true, cancelable: true, composed: true }));
+          };
+
           window.addEventListener('keydown', (ev) => {
-            if (location.pathname.includes('/play/') || document.fullscreenElement) { nudge(); return; }
+            const layer = playerLayer();
+            if (location.pathname.includes('/play/') || document.fullscreenElement || layer) {
+              nudge();
+              try { if (layer) intoPlayer(layer, ev); } catch (e) { console.warn('tv player focus', e); }
+              return;
+            }
             const d = DIRS[ev.key];
             if (!d || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
             const cur = deep();

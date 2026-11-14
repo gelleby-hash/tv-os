@@ -51,9 +51,12 @@ public sealed class PageScriptsTests
         Assert.Contains("ev.preventDefault()", script);
         // The player's URL (seen in Disney+'s own links, 2026-10-30) keeps its keys. arrownav.test.cjs runs the rest.
         Assert.Contains("'/play/'", script);
+        // So does a video filling the screen in a fixed layer (Prime Video, 2026-11-14): the script only measures it.
+        Assert.Contains("querySelectorAll('video')", script);
         Assert.DoesNotContain("pause(", script);
         Assert.DoesNotContain("play(", script);
-        Assert.DoesNotContain("video", script);
+        Assert.DoesNotContain("currentTime", script);
+        Assert.DoesNotContain("muted", script);
     }
 
     [Fact]
