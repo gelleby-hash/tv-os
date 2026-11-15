@@ -114,7 +114,13 @@ fun RemoteScreen(
                 RoundKey(RemoteKey.Home, "Home", press) { Glyph(HomeIcon, HomeBlue) }
                 // The Rii's 3-lines key: in an app, the menu of the item in focus (Prime Video's hover card).
                 RoundKey(RemoteKey.Menu, "Menu", press) { Glyph(MenuIcon, Ink) }
+                RoundKey(RemoteKey.Mute, "Mute", press) { Glyph(MuteIcon, Ink) }
+            }
+            // The Rii's backward, play/pause and forward buttons: in YouTube the previous and the next video.
+            Row(Modifier.width(240.dp).padding(top = 18.dp), Arrangement.SpaceBetween) {
+                RoundKey(RemoteKey.PreviousTrack, "Previous", press) { Glyph(PreviousIcon, Ink) }
                 RoundKey(RemoteKey.PlayPause, "Play or pause", press) { Glyph(PlayPauseIcon, Ink) }
+                RoundKey(RemoteKey.NextTrack, "Next", press) { Glyph(NextIcon, Ink) }
             }
             VolumeRocker(press)
             Spacer(Modifier.height(40.dp))
@@ -383,6 +389,24 @@ private val HomeIcon = icon("Home") {
 private val MenuIcon = icon("Menu") {
     addPath(
         addPathNodes("M4 6.5 L20 6.5 M4 12 L20 12 M4 17.5 L20 17.5"),
+        stroke = Black,
+        strokeLineWidth = 2.2f,
+        strokeLineCap = StrokeCap.Round,
+    )
+}
+
+private val PreviousIcon = icon("Previous") {
+    addPath(addPathNodes("M5 6 L7.5 6 L7.5 18 L5 18 Z M19 6 L19 18 L9 12 Z"), fill = Black)
+}
+
+private val NextIcon = icon("Next") {
+    addPath(addPathNodes("M5 6 L15 12 L5 18 Z M16.5 6 L19 6 L19 18 L16.5 18 Z"), fill = Black)
+}
+
+private val MuteIcon = icon("Mute") {
+    addPath(addPathNodes("M3 9.5 L7 9.5 L12 5 L12 19 L7 14.5 L3 14.5 Z"), fill = Black)
+    addPath(
+        addPathNodes("M15.5 9.5 L20.5 14.5 M20.5 9.5 L15.5 14.5"),
         stroke = Black,
         strokeLineWidth = 2.2f,
         strokeLineCap = StrokeCap.Round,

@@ -14,7 +14,7 @@ class ProtocolTest {
     fun WireNamesMatchTheLauncher() {
         // launcher/src/TvLauncher/Remote/RemoteProtocol.cs, in its order: exact and case-sensitive.
         assertEquals(
-            listOf("up", "down", "left", "right", "ok", "back", "home", "playPause", "volumeUp", "volumeDown", "menu"),
+            listOf("up", "down", "left", "right", "ok", "back", "home", "playPause", "volumeUp", "volumeDown", "menu", "nextTrack", "previousTrack", "mute"),
             RemoteKey.entries.map { it.wire },
         )
     }

@@ -10,7 +10,8 @@ public static class RemoteKeys
 {
     private const int VkReturn = 13;
     private const int VkLeft = 37, VkUp = 38, VkRight = 39, VkDown = 40;
-    private const int VkVolumeDown = 174, VkVolumeUp = 175, VkMediaPlayPause = 179;
+    private const int VkVolumeMute = 173, VkVolumeDown = 174, VkVolumeUp = 175;
+    private const int VkMediaNextTrack = 176, VkMediaPrevTrack = 177, VkMediaPlayPause = 179;
 
     /// <summary>
     /// Home, Back and the menu key come from the config, as the hook reads them: Home is the first entry of
@@ -30,6 +31,11 @@ public static class RemoteKeys
         RemoteKey.VolumeUp => VkVolumeUp,
         RemoteKey.VolumeDown => VkVolumeDown,
         RemoteKey.Menu => config.MenuKeyVk,
+        // The Rii's forward and backward buttons are next and previous track, and YouTube jumps to the next and the
+        // previous video with them (owner, 2026-11-15; recorded the same day).
+        RemoteKey.NextTrack => VkMediaNextTrack,
+        RemoteKey.PreviousTrack => VkMediaPrevTrack,
+        RemoteKey.Mute => VkVolumeMute,
         _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Not a key the remote can press."),
     };
 

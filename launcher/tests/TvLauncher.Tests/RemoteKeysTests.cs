@@ -48,6 +48,10 @@ public sealed class RemoteKeysTests : IDisposable
     [InlineData(RemoteKey.VolumeUp, 175)]
     [InlineData(RemoteKey.VolumeDown, 174)]
     [InlineData(RemoteKey.Menu, 93)]
+    // The Rii i25's forward, backward and mute buttons (recorded 2026-11-15).
+    [InlineData(RemoteKey.NextTrack, 176)]
+    [InlineData(RemoteKey.PreviousTrack, 177)]
+    [InlineData(RemoteKey.Mute, 173)]
     public void MapsEveryKey(RemoteKey key, int expected)
     {
         // The mini PC's own setting: the remote's Home plus the keyboard's F12. The first entry is the Rii's.
