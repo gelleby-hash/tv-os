@@ -15,6 +15,7 @@ enum class RemoteKey(val wire: String) {
     PlayPause("playPause"),
     VolumeUp("volumeUp"),
     VolumeDown("volumeDown"),
+    Menu("menu"),
 }
 
 /** A message from the launcher. */

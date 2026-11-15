@@ -15,7 +15,9 @@ public sealed class HomePressedEventArgs(long timestamp) : EventArgs
 /// Home key (down, up, repeats and debounced presses) is swallowed, so the app in front never sees it: in an
 /// app VK_BROWSER_HOME would navigate away from the service. A press the <see cref="HomeKeyFilter"/> accepts
 /// raises <see cref="HomePressed"/>. The Back key is swallowed and raises <see cref="BackPressed"/> only while
-/// <see cref="AppInFront"/>; on the home screen it passes to the page. The extra keys (the remote's Search and
+/// <see cref="AppInFront"/>; on the home screen it passes to the page. The menu key likewise raises
+/// <see cref="MenuPressed"/> and is swallowed while an app is in front. The pointer key raises
+/// <see cref="PointerKeyPressed"/> and is swallowed while the launcher is in front. The extra keys (the remote's Search and
 /// menu buttons) are swallowed while <see cref="LauncherInFront"/>, and pass when the desktop button stepped the
 /// launcher aside. Events flagged as injected count as real: Windows flags the Rii i25's Home and Back so, and
 /// the launcher never sends these keys itself.
@@ -27,9 +29,13 @@ public sealed class KeyboardHook : IDisposable
 {
     private readonly IReadOnlyList<int> _homeVks;
     private readonly int _backVk;
+    private readonly int _menuVk;
+    private readonly int _pointerVk;
     private readonly IReadOnlyList<int> _swallowVks;
     private readonly HomeKeyFilter _homeFilter;
     private readonly HomeKeyFilter _backFilter;
+    private readonly HomeKeyFilter _menuFilter;
+    private readonly HomeKeyFilter _pointerFilter;
     private readonly SynchronizationContext? _context;
     // Held in a field so the garbage collector cannot free the delegate while Windows still calls it.
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
@@ -39,14 +45,20 @@ public sealed class KeyboardHook : IDisposable
 
     /// <param name="homeVks">Virtual-key codes of the Home keys; a press of any of them goes home.</param>
     /// <param name="backVk">Virtual-key code of the Back key.</param>
+    /// <param name="menuVk">Virtual-key code of the menu key.</param>
+    /// <param name="pointerVk">Virtual-key code of the key that frees and parks the remote's air mouse.</param>
     /// <param name="swallowVks">Keys kept from Windows, and from the app, while the launcher is in front.</param>
-    public KeyboardHook(IReadOnlyList<int> homeVks, int backVk, IReadOnlyList<int> swallowVks)
+    public KeyboardHook(IReadOnlyList<int> homeVks, int backVk, int menuVk, int pointerVk, IReadOnlyList<int> swallowVks)
     {
         _swallowVks = swallowVks;
         _homeVks = homeVks;
         _backVk = backVk;
+        _menuVk = menuVk;
+        _pointerVk = pointerVk;
         _homeFilter = new HomeKeyFilter(homeVks);
         _backFilter = new HomeKeyFilter([backVk]);
+        _menuFilter = new HomeKeyFilter([menuVk]);
+        _pointerFilter = new HomeKeyFilter([pointerVk]);
         _context = SynchronizationContext.Current;
         _proc = HookCallback;
 
@@ -88,6 +100,12 @@ public sealed class KeyboardHook : IDisposable
 
     /// <summary>Raised like <see cref="HomePressed"/>, for a press of the Back key while <see cref="AppInFront"/>.</summary>
     public event EventHandler? BackPressed;
+
+    /// <summary>Raised like <see cref="BackPressed"/>, for a press of the menu key while <see cref="AppInFront"/>.</summary>
+    public event EventHandler? MenuPressed;
+
+    /// <summary>Raised like <see cref="BackPressed"/>, for a press of the pointer key while <see cref="LauncherInFront"/>.</summary>
+    public event EventHandler? PointerKeyPressed;
 
     /// <summary>True while an app is in front, set by the window. Read on the hook thread, so volatile.</summary>
     public volatile bool AppInFront;
@@ -135,21 +153,26 @@ public sealed class KeyboardHook : IDisposable
                 RaiseHomePressed(new HomePressedEventArgs(Stopwatch.GetTimestamp()));
             else if (appInFront && _backFilter.ShouldTrigger(vkCode, keyDown, now))
                 RaiseBackPressed();
-            if (ShouldSwallow(_homeVks, _backVk, _swallowVks, appInFront, launcherInFront, vkCode))
+            else if (appInFront && _menuFilter.ShouldTrigger(vkCode, keyDown, now))
+                RaiseMenuPressed();
+            else if (launcherInFront && _pointerFilter.ShouldTrigger(vkCode, keyDown, now))
+                RaisePointerKeyPressed();
+            if (ShouldSwallow(_homeVks, _backVk, _menuVk, _pointerVk, _swallowVks, appInFront, launcherInFront, vkCode))
                 return 1;
         }
         return NativeMethods.CallNextHookEx(IntPtr.Zero, code, message, data);
     }
 
     /// <summary>
-    /// Every event of a Home key is kept from the app in front, of the Back key while an app is in front, and of
-    /// the extra keys while the launcher is in front.
+    /// Every event of a Home key is kept from the app in front, of the Back and menu keys while an app is in front,
+    /// and of the pointer key and the extra keys while the launcher is in front.
     /// Whether Windows flagged the event as injected is not asked (see the class summary).
     /// </summary>
     internal static bool ShouldSwallow(
-        IReadOnlyList<int> homeVks, int backVk, IReadOnlyList<int> swallowVks, bool appInFront, bool launcherInFront, int vkCode) =>
+        IReadOnlyList<int> homeVks, int backVk, int menuVk, int pointerVk, IReadOnlyList<int> swallowVks, bool appInFront, bool launcherInFront, int vkCode) =>
         homeVks.Contains(vkCode)
-        || (appInFront && vkCode == backVk)
+        || (appInFront && (vkCode == backVk || vkCode == menuVk))
+        || (launcherInFront && vkCode == pointerVk)
         || (launcherInFront && swallowVks.Contains(vkCode));
 
     /// <summary>True, and one fewer left, for a key-down while any are left to report.</summary>
@@ -189,6 +212,22 @@ public sealed class KeyboardHook : IDisposable
             _context.Post(_ => BackPressed?.Invoke(this, EventArgs.Empty), null);
         else
             ThreadPool.QueueUserWorkItem(_ => BackPressed?.Invoke(this, EventArgs.Empty));
+    }
+
+    private void RaisePointerKeyPressed()
+    {
+        if (_context is not null)
+            _context.Post(_ => PointerKeyPressed?.Invoke(this, EventArgs.Empty), null);
+        else
+            ThreadPool.QueueUserWorkItem(_ => PointerKeyPressed?.Invoke(this, EventArgs.Empty));
+    }
+
+    private void RaiseMenuPressed()
+    {
+        if (_context is not null)
+            _context.Post(_ => MenuPressed?.Invoke(this, EventArgs.Empty), null);
+        else
+            ThreadPool.QueueUserWorkItem(_ => MenuPressed?.Invoke(this, EventArgs.Empty));
     }
 
     private static class NativeMethods

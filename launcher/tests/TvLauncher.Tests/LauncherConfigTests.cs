@@ -65,7 +65,43 @@ public sealed class LauncherConfigTests : IDisposable
         Assert.Equal([172], cfg.HomeKeyVks);
         Assert.Empty(cfg.SwallowKeyVks);
         Assert.Equal(166, cfg.BackKeyVk);
+        Assert.Equal(93, cfg.MenuKeyVk);
+        Assert.False(cfg.ParkPointer);
+        Assert.Null(cfg.AirMouseDevice);
+        Assert.Equal(170, cfg.PointerKeyVk);
         Assert.True(cfg.RequireHdr);
+    }
+
+    [Fact]
+    public void Load_ParkPointer_IsRead()
+    {
+        var cfg = LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"ParkPointer\": true,")));
+
+        Assert.True(cfg.ParkPointer);
+    }
+
+    [Fact]
+    public void Load_AirMouseDevice_IsRead()
+    {
+        var cfg = LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"AirMouseDevice\": \"VID_1997&PID_2433\",")));
+
+        Assert.Equal("VID_1997&PID_2433", cfg.AirMouseDevice);
+    }
+
+    [Fact]
+    public void Load_PointerKey_IsRead()
+    {
+        var cfg = LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"PointerKeyVk\": 33,")));
+
+        Assert.Equal(33, cfg.PointerKeyVk);
+    }
+
+    [Fact]
+    public void Load_MenuKey_IsRead()
+    {
+        var cfg = LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"MenuKeyVk\": 77,")));
+
+        Assert.Equal(77, cfg.MenuKeyVk);
     }
 
     [Fact]

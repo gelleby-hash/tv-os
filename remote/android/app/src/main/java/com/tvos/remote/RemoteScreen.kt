@@ -109,9 +109,11 @@ fun RemoteScreen(
             Microphone(mic, tapMic)
             MicLine(mic.line)
             DPad(press)
-            Row(Modifier.width(300.dp).padding(start = 30.dp, top = 22.dp, end = 30.dp), Arrangement.SpaceBetween) {
+            Row(Modifier.width(320.dp).padding(start = 20.dp, top = 22.dp, end = 20.dp), Arrangement.SpaceBetween) {
                 RoundKey(RemoteKey.Back, "Back", press) { Glyph(BackIcon, Ink) }
                 RoundKey(RemoteKey.Home, "Home", press) { Glyph(HomeIcon, HomeBlue) }
+                // The Rii's 3-lines key: in an app, the menu of the item in focus (Prime Video's hover card).
+                RoundKey(RemoteKey.Menu, "Menu", press) { Glyph(MenuIcon, Ink) }
                 RoundKey(RemoteKey.PlayPause, "Play or pause", press) { Glyph(PlayPauseIcon, Ink) }
             }
             VolumeRocker(press)
@@ -375,6 +377,15 @@ private val HomeIcon = icon("Home") {
         stroke = Black,
         strokeLineWidth = 2.2f,
         strokeLineJoin = StrokeJoin.Round,
+    )
+}
+
+private val MenuIcon = icon("Menu") {
+    addPath(
+        addPathNodes("M4 6.5 L20 6.5 M4 12 L20 12 M4 17.5 L20 17.5"),
+        stroke = Black,
+        strokeLineWidth = 2.2f,
+        strokeLineCap = StrokeCap.Round,
     )
 }
 

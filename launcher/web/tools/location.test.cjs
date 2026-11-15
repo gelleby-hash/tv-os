@@ -69,7 +69,7 @@ const ok = body => ({ ok: true, json: () => Promise.resolve(body) });
 // Moves the focus to an element as the mouse does, then presses OK on it.
 function enterOn(page, el) {
   assert.ok(el, 'the element to press is there');
-  page.fire(el, 'mouseover');
+  page.point(el);
   assert.equal(page.focused(), el, 'the element took the focus');
   page.pressKey(13);
 }
@@ -832,7 +832,7 @@ test('the card comes back when the forecast answers', async () => {
 
 test('a card in focus that goes away hands the focus to the first tile', async () => {
   const page = await pageWith({ fetch: failing() });
-  page.fire(page.$('weather'), 'mouseover');
+  page.point(page.$('weather'));
   assert.equal(page.focused(), page.$('weather'));
   page.deliver(placeMessage('config'));
   await page.settle();

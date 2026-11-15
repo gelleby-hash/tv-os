@@ -143,6 +143,9 @@ internal static class PageScripts
     /// <summary>Never shows what the CSS selector matches. The selector goes in as a JSON string, so no selector can end the script.</summary>
     public static string HideElements(string selector) => HideElementsScript.Replace("__SELECTOR__", JsonSerializer.Serialize(selector));
 
+    /// <summary>Tells the page the remote's 3-lines key was pressed; the arrows' script opens the item's hover card.</summary>
+    public const string ItemMenu = "window.dispatchEvent(new Event('tv-menu'))";
+
     // Runs in every page of an app with ArrowNav, before the page's own scripts, so its key listener comes first. The
     // remote's arrows move focus to the nearest link or button that way, one at a time. Disney+'s own handler pages a
     // row five tiles per press, and Chromium's spatial navigation stops on empty divs between tiles and scrolls the
@@ -158,12 +161,39 @@ internal static class PageScripts
           // where it would win the first press (measured 2026-10-30).
           const scrollArrow = (e) => e.hasAttribute('aria-controls') && e.getAttribute('role') !== 'tab'
             && !e.hasAttribute('aria-expanded') && !e.hasAttribute('aria-haspopup');
+          // A form field moved off the screen sideways and drawn by its label: Prime Video's season selector is a
+          // checkbox far to the left of the page (2026-11-15). It is measured, and scrolled into view, by its label.
+          const face = (e) => {
+            const r = e.getBoundingClientRect();
+            if (e.labels && (r.right <= 0 || r.left >= innerWidth))
+              for (const l of e.labels) { const q = l.getBoundingClientRect(); if (q.width >= 4 && q.height >= 4) return l; }
+            return e;
+          };
           const usable = (e) => {
             if (e.disabled || e.getAttribute('aria-disabled') === 'true' || e.closest('[inert]') || scrollArrow(e)) return false;
-            const r = e.getBoundingClientRect();
+            const r = face(e).getBoundingClientRect();
             if (r.width < 4 || r.height < 4) return false;
             const s = getComputedStyle(e);
-            return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+            // At opacity 0 a button is not there yet (a carousel arrow, a hover card's button), but a link still leads
+            // somewhere: Prime Video lays each episode's play link over its picture at opacity 0 (2026-11-15).
+            if (s.visibility === 'hidden' || s.display === 'none' || (s.opacity === '0' && !(e.tagName === 'A' && e.hasAttribute('href')))) return false;
+            // Inside something at opacity 0: Prime Video stacks its banner's slides in one place and hides all but
+            // one that way (measured 2026-11-15), and the focus would go to buttons nobody can see.
+            for (let p = e.parentElement; p; p = p.parentElement) if (getComputedStyle(p).opacity === '0') return false;
+            return true;
+          };
+          // The items that can take the focus in a part of the page. A link the page keeps out of the tab order
+          // (tabindex -1) stretched behind other items it does not hold is left out: Prime Video's banner image lies
+          // behind the banner's title and buttons and shows no focus ring, so on it the focus seemed gone (2026-11-15).
+          // An item in a bar fixed to the screen is not on the page under it: scrolled up, Prime's tiles pass under
+          // its menu bar. Each item measures the same for the whole key press.
+          const items = (root) => {
+            const all = [];
+            for (const e of root.querySelectorAll(PICK)) if (usable(e)) all.push({ e, r: face(e).getBoundingClientRect() });
+            const behind = (a, b) => a !== b && !a.e.contains(b.e) && b.r.left >= a.r.left && b.r.right <= a.r.right
+              && b.r.top >= a.r.top && b.r.bottom <= a.r.bottom && b.r.width * b.r.height * 2 < a.r.width * a.r.height
+              && (b.pinned ??= pinned(b.e)) === (a.pinned ??= pinned(a.e));
+            return all.filter(a => a.e.getAttribute('tabindex') !== '-1' || !all.some(b => behind(a, b)));
           };
           // Cut out of sight by a parent that clips (a hidden slide). A parent that scrolls does not count: the next
           // tile off the edge of a row is reachable, and focusing it scrolls it in.
@@ -189,42 +219,68 @@ internal static class PageScripts
           // Along a row, a carousel's tile past its edge counts too: the carousel is told to show it.
           const rank = (found, fromBar, along) => {
             found.sort((a, b) => a.score - b.score);
-            const shown = found.filter(f => !clipped(f.e) || (along && carousel(f.e)));
+            const shown = found.filter(f => !clipped(face(f.e)) || (along && carousel(f.e)));
             return (shown.find(f => fromBar || !pinned(f.e)) || shown[0] || {}).e;
           };
 
           const next = (cur, d) => {
-            const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
-            const found = [];
-            for (const e of (cur.closest('[role="dialog"]') || document).querySelectorAll(PICK)) {
-              if (e === cur || e.contains(cur) || cur.contains(e) || !usable(e)) continue;
-              const r = e.getBoundingClientRect();
+            const c = face(cur).getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+            const found = [], fromBar = pinned(cur);
+            for (const { e, r } of items(cur.closest('[role="dialog"]') || document)) {
+              if (e === cur || e.contains(cur) || cur.contains(e)) continue;
+              // Laid over the item in focus, not beside it: Prime Video's focus card puts the episode's Download button
+              // in the corner of its picture (2026-11-15).
+              if (r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom) continue;
               // How far it lies in the direction pressed (edge to edge), and how far off to the side (centre to centre).
               const ahead = d[0] > 0 ? r.left - c.right : d[0] < 0 ? c.left - r.right : d[1] > 0 ? r.top - c.bottom : c.top - r.bottom;
               if (ahead < -Math.min(c.width, c.height) / 2) continue;
               // Left and Right stay in the row; Up and Down only go to what is on screen across.
               if (d[0] !== 0 && (r.bottom <= c.top || r.top >= c.bottom)) continue;
               if (d[1] !== 0 && (r.right <= 0 || r.left >= innerWidth)) continue;
+              // Never more than a screen away: Prime Video adds rows only as the page nears its end, and pressing
+              // quickly, Down from the last row there was went to the footer far below (2026-11-15).
+              if (d[1] !== 0 && ahead > innerHeight) continue;
+              // Down never goes from the page into a bar fixed to the screen: with the page scrolled up past the menu
+              // bar, the bar lies below what is focused (Prime Video, 2026-11-15). Up reaches it.
+              if (d[1] > 0 && !fromBar && pinned(e)) continue;
               // How far off to the side: from its centre to the nearest edge of the current item, none when it lies
               // across from it, so from an item stretched across the page the nearest one ahead wins (Prime Video's
               // title page, 2026-11-14: its logo link spans the page, and the synopsis under its middle beat Play).
               // How far apart the centres are only breaks ties.
               const mid = d[0] !== 0 ? r.top + r.height / 2 : r.left + r.width / 2;
-              const off = d[0] !== 0 ? Math.max(c.top - mid, mid - c.bottom, 0) : Math.max(c.left - mid, mid - c.right, 0);
+              // Also none when it spans the current item's middle: from a tab under a wide button, the button
+              // (Prime's Go ad free over its Episodes tab, 2026-11-15).
+              const spans = d[0] !== 0 ? r.top <= cy && r.bottom >= cy : r.left <= cx && r.right >= cx;
+              const off = spans ? 0 : d[0] !== 0 ? Math.max(c.top - mid, mid - c.bottom, 0) : Math.max(c.left - mid, mid - c.right, 0);
               const centres = Math.abs(mid - (d[0] !== 0 ? cy : cx));
-              found.push({ e, score: Math.max(ahead, 0) + off * 2 + centres / 10 });
+              // How well the two line up across: the share of the wider one that the other covers. Lining up with
+              // none of it counts as much as lying one more of the current item's own sizes away, so the tile under a
+              // tile beats a small link between the rows, and Watch now under a title beats the small Watchlist button
+              // beside it (Prime Video, 2026-11-15). From an item stretched across the page, whose size that way is
+              // small, the nearest one ahead still wins.
+              const shared = d[0] !== 0 ? Math.min(r.bottom, c.bottom) - Math.max(r.top, c.top) : Math.min(r.right, c.right) - Math.max(r.left, c.left);
+              const share = Math.max(shared, 0) / (d[0] !== 0 ? Math.max(r.height, c.height) : Math.max(r.width, c.width));
+              const size = d[0] !== 0 ? c.width : c.height;
+              found.push({ e, ahead: Math.max(ahead, 0), score: Math.max(ahead, 0) + off * 2 + centres / 10 + (1 - share) * size });
             }
-            return rank(found, pinned(cur), d[0] !== 0);
+            const to = rank(found, fromBar, d[0] !== 0);
+            // Up and Down never pass a row of tabs, which switches what is shown under it: they stop on its selected
+            // tab, as on a TV. From Prime Video's episodes, Up went to whichever of Episodes, Related and Details lay
+            // nearest, or over them to the wide synopsis above (2026-11-15).
+            if (d[1] !== 0 && to && cur.getAttribute('role') !== 'tab' && !(to.getAttribute('role') === 'tab' && to.getAttribute('aria-selected') === 'true')) {
+              const past = found.find(f => f.e === to).ahead;
+              // Tabs in a bar fixed to the screen are a menu, not a row in the page (Disney+'s For You, Disney+ and Hulu).
+              const tab = found.find(f => f.e.getAttribute('role') === 'tab' && f.e.getAttribute('aria-selected') === 'true' && f.ahead <= past
+                && (fromBar || !pinned(f.e)));
+              if (tab) return tab.e;
+            }
+            return to;
           };
 
           // Nothing focused yet (a page just opened): start at the top left of the page, not in the top menu.
           const first = () => {
             const found = [];
-            for (const e of document.querySelectorAll(PICK)) {
-              if (!usable(e)) continue;
-              const r = e.getBoundingClientRect();
-              if (onScreen(r)) found.push({ e, score: r.top + r.left / 4 });
-            }
+            for (const { e, r } of items(document)) if (onScreen(r)) found.push({ e, score: r.top + r.left / 4 });
             return rank(found, false);
           };
 
@@ -266,31 +322,125 @@ internal static class PageScripts
               altKey: ev.altKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, shiftKey: ev.shiftKey, bubbles: true, cancelable: true, composed: true }));
           };
 
+          // A mouse pointer resting over the page does not mix with the arrows: as they scroll the page, the tiles
+          // pass under it and the page reacts to it. Prime Video's hover cards took the focus from the tile the
+          // arrows had reached, so the next press started again at the top, and made the rows grow (2026-11-15).
+          // While the arrows are in use the page ignores the pointer; moving the mouse gives it back. A mouse event
+          // whose screen position has not changed is not a move.
+          const remote = document.createElement('style');
+          remote.textContent = 'html.tv-keys, html.tv-keys * { pointer-events: none !important; }';
+          const keysMode = (on) => {
+            const html = document.documentElement;
+            if (!html) return;
+            if (on && !remote.parentNode) (document.head || html).appendChild(remote);
+            if (on) html.classList.add('tv-keys'); else html.classList.remove('tv-keys');
+          };
+          // Where on the page (not on the screen) the arrows last put the focus, and when the last arrow came.
+          let placed = null, last = -Infinity;
+          let at = null;
+          window.addEventListener('mousemove', (ev) => {
+            if (!ev.isTrusted) return;
+            const now = ev.screenX + ',' + ev.screenY;
+            if (at !== null && now !== at) keysMode(false);
+            at = now;
+          }, true);
+
+          // The remote's 3-lines key (the launcher's ItemMenu sends 'tv-menu'): the hover card a page shows for the item
+          // under a resting mouse, opened for the item in focus, with the focus moved into it; pressed again, or an
+          // arrow out of the card, closes it. Prime Video shows Resume, the trailer, its watchlist and hide buttons
+          // only there (owner, 2026-11-15; a scripted hover opens it within 200 ms, a scripted leave closes it).
+          let card = null;
+          const point = (e, types, x, y) => {
+            for (const t of types)
+              e.dispatchEvent(new (t.startsWith('pointer') ? PointerEvent : MouseEvent)(t, { bubbles: !/enter|leave/.test(t), cancelable: true,
+                composed: true, clientX: x, clientY: y, view: window, relatedTarget: /out|leave/.test(t) ? document.body : null }));
+          };
+          const LEAVE = ['pointerout', 'pointerleave', 'mouseout', 'mouseleave'];
+          const closeCard = (refocus) => {
+            if (!card) return;
+            const e = card.e;
+            card = null;
+            point(e, LEAVE, 0, 0);
+            if (refocus && e.isConnected) e.focus({ preventScroll: true });
+          };
+          window.addEventListener('tv-menu', () => {
+            try {
+              if (card) { closeCard(true); return; }
+              const e = deep();
+              if (!e || e === document.body || e === document.documentElement) return;
+              const before = new Set(items(document).map(i => i.e));
+              const r = face(e).getBoundingClientRect();
+              point(e, ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove'],
+                Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+              setTimeout(() => {
+                try {
+                  const fresh = items(document).filter(i => !before.has(i.e));
+                  if (!fresh.length) { point(e, LEAVE, 0, 0); return; }
+                  card = { e, items: new Set(fresh.map(i => i.e)) };
+                  // The first of the card, not the picture it lays over the item.
+                  const apart = fresh.filter(i => i.r.top >= r.bottom || i.r.bottom <= r.top || i.r.left >= r.right || i.r.right <= r.left);
+                  const pick = (apart.length ? apart : fresh).sort((a, b) => (a.r.top + a.r.left / 4) - (b.r.top + b.r.left / 4))[0];
+                  pick.e.focus({ preventScroll: true });
+                  placed = { e: pick.e, y: pick.r.top + scrollY };
+                } catch (err) { console.warn('tv menu', err); }
+              }, 300);
+            } catch (err) { console.warn('tv menu', err); }
+          });
+
           window.addEventListener('keydown', (ev) => {
             const layer = playerLayer();
             if (location.pathname.includes('/play/') || document.fullscreenElement || layer) {
+              try { keysMode(false); } catch (e) { console.warn('tv pointer', e); }
               nudge();
               try { if (layer) intoPlayer(layer, ev); } catch (e) { console.warn('tv player focus', e); }
               return;
             }
-            const d = DIRS[ev.key];
-            if (!d || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+            if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
             const cur = deep();
+            // OK on a checkbox ticks it: a page ticks one with Space, not Enter, and the remote has no Space.
+            if (ev.key === 'Enter' && cur && cur.tagName === 'INPUT' && (cur.type === 'checkbox' || cur.type === 'radio')) {
+              ev.preventDefault();
+              ev.stopImmediatePropagation();
+              cur.click();
+              return;
+            }
+            const d = DIRS[ev.key];
+            if (!d) return;
             if (typing(cur) && d[0] !== 0) return;
             ev.preventDefault();
             ev.stopImmediatePropagation();
+            try { keysMode(true); } catch (e) { console.warn('tv pointer', e); }
+            // Someone is there: Prime Video fades its title page's details out while the trailer plays and brings them
+            // back on a mouse move, but the arrows take the key before the page sees it (2026-11-15). A scripted move,
+            // so the remote mode stays.
+            try { document.body.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: Math.round(innerWidth / 2), clientY: Math.round(innerHeight / 2) })); }
+            catch (e) { console.warn('tv wake', e); }
             try {
-              const start = !cur || cur === document.body || cur === document.documentElement;
+              // Far out of sight counts as nothing focused when the page grew or moved under the focus: Prime Video
+              // adds rows above its footer, which Down had reached while it was the end of the page (2026-11-15). Not
+              // when the arrows only ran ahead of the scroll (a held key): the focus is where they put it on the page.
+              const now = performance.now(), quick = now - last < 400;
+              last = now;
+              const nothing = !cur || cur === document.body || cur === document.documentElement;
+              const c = nothing ? null : face(cur).getBoundingClientRect();
+              const away = c && (c.top > innerHeight * 1.5 || c.bottom < -innerHeight / 2)
+                && !(placed && placed.e === cur && Math.abs(c.top + scrollY - placed.y) < innerHeight / 2);
+              const start = nothing || away;
               const to = start ? first() : next(cur, d);
+              // Nothing within a screen up or down: the page moves on a little, so it can show more.
+              if (!to && !start && d[1] !== 0) window.scrollBy({ top: d[1] * Math.round(innerHeight / 3), behavior: quick ? 'instant' : 'smooth' });
               if (!to) return;
+              if (card && !card.items.has(to)) closeCard(false);
               // A carousel tile not wholly in the carousel's box (hidden, or cut by its edge) is slid into sight.
               // Scrolling into view would scroll the carousel's clipping box itself, behind the carousel's back.
-              const box = carousel(to), r = to.getBoundingClientRect(), q = box && box.getBoundingClientRect();
+              const box = carousel(to), r = face(to).getBoundingClientRect(), q = box && box.getBoundingClientRect();
               const cut = box && (r.left < q.left - 1 || r.right > q.right + 1);
               const slide = cut ? Array.prototype.indexOf.call(box.swiper.slides, to.closest('.swiper-slide')) : -1;
               to.focus({ preventScroll: true });
+              placed = { e: to, y: r.top + scrollY };
+              // A smooth scroll lags behind quick presses and a held key, so those scroll at once.
               if (slide >= 0) box.swiper.slideTo(slide);
-              else to.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+              else face(to).scrollIntoView({ block: 'center', inline: 'nearest', behavior: quick ? 'instant' : 'smooth' });
             } catch (e) { console.warn('tv arrows', e); }
           }, true);
         })();

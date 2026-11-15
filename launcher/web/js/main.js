@@ -836,8 +836,20 @@
     return el.dataset.action || el.id || el.className;
   }
 
+  // Only a mouse that moves moves the focus. The TV box's pointer rests where Windows put it at sign-in, and Edge sends
+  // a mouseover each time the page moves under it (a tile grows, the row slides), which took the focus from the
+  // remote's arrows (owner at the TV, 2026-11-15). A move is a mouse event at a new place on the screen; a key hands
+  // the focus back to the arrows until the mouse moves again.
+  var pointerLive = false, pointerAt = null;
+  document.addEventListener('mousemove', function (e) {
+    var at = e.screenX + ',' + e.screenY;
+    if (e.isTrusted !== false && pointerAt !== null && at !== pointerAt) pointerLive = true;
+    pointerAt = at;
+  });
+
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
+    pointerLive = false;
     if (keysToReport > 0) { keysToReport--; H.post({ type: 'key', code: k, id: scope.id + ':' + describeFocus(focused) }); }
     if (scope === $('ambient')) { e.preventDefault(); closeOverlay(); return; }
     if (scope === $('apps') && carryingId && carryKey(k)) { e.preventDefault(); return; }
@@ -856,6 +868,7 @@
   // Samsung remote pointer and desktop mouse.
   document.addEventListener('mouseover', function (e) {
     if (!pointerReported) { pointerReported = true; H.post({ type: 'pointer' }); }
+    if (!pointerLive) return;
     var el = e.target.closest && e.target.closest('.focusable');
     if (carryingId) return;   // a carried row keeps the focus
     if (el && scope.contains(el) && el !== focused) focusEl(el);

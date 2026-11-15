@@ -80,6 +80,12 @@ internal sealed class FakeAppView(string id, List<string> calls) : IAppView
     }
 
     public void GoBack() => calls.Add($"{id}.goBack");
+
+    public Task OpenItemMenuAsync()
+    {
+        calls.Add($"{id}.itemMenu");
+        return Task.CompletedTask;
+    }
     public void Reload() => calls.Add($"{id}.reload");
     public void Show() => calls.Add($"{id}.show");
     public void RestoreFocus() => calls.Add($"{id}.restoreFocus");

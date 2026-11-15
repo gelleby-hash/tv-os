@@ -213,11 +213,19 @@ function loadPage(options = {}) {
     for (const e of [body, ...body.querySelectorAll('*')]) if (e.id === id) return e;
     return null;
   };
-  function fire(target, type) {
-    const event = { type, target, keyCode: 0, preventDefault() { event.defaultPrevented = true; } };
+  function fire(target, type, extra) {
+    const event = Object.assign({ type, target, keyCode: 0, preventDefault() { event.defaultPrevented = true; } }, extra);
     (docListeners[type] || []).forEach(fn => fn(event));
     return event;
   }
+  // A real mouse moving onto the element: two moves at different places on the screen, then the mouseover.
+  let pointerX = 100;
+  function point(target) {
+    fire(target, 'mousemove', { isTrusted: true, screenX: pointerX++, screenY: 500 });
+    fire(target, 'mousemove', { isTrusted: true, screenX: pointerX++, screenY: 500 });
+    return fire(target, 'mouseover');
+  }
+  page.point = point;
   const document = {
     body, documentElement, title: '', hidden: false,
     getElementById: byId,
@@ -291,6 +299,7 @@ function loadPage(options = {}) {
     $: byId,
     plain,
     fire,
+    point,
     tick(ms) {
       const end = timerNow + ms;
       for (;;) {

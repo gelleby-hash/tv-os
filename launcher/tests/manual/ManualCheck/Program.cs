@@ -14,6 +14,7 @@ using TvLauncher.Input;
 
 const int VkF24 = 0x87;
 const int VkF23 = 0x86;
+const int VkF22 = 0x85;
 const string DummyName = "TvosDummyWindow";
 
 var manualDir = FindManualDir();
@@ -30,7 +31,7 @@ try
 {
     // 1. The hook installs on its own thread and unhooks without hanging (needs no input).
     var watch = Stopwatch.StartNew();
-    new KeyboardHook([VkF24], VkF23, []).Dispose();
+    new KeyboardHook([VkF24], VkF23, VkF22, VkF22, []).Dispose();
     Log($"KeyboardHook install and dispose took {watch.ElapsedMilliseconds} ms");
     Check(true, "KeyboardHook installed and unhooked cleanly");
 
@@ -62,7 +63,7 @@ try
         // 4. Hook installed: the press is swallowed and its handler brings the target back to the front.
         var pressed = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
         // The hook treats injected keys as real (the remote's are flagged so), which is what this check relies on.
-        using var hook = new KeyboardHook([VkF24], VkF23, []);
+        using var hook = new KeyboardHook([VkF24], VkF23, VkF22, VkF22, []);
         hook.HomePressed += (_, _) =>
         {
             var at = Stopwatch.GetTimestamp();

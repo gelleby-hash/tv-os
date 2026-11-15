@@ -636,6 +636,28 @@ public sealed class AppSwitcherTests
     }
 
     [Fact]
+    public async Task Menu_OpensTheItemMenuInTheAppInFront()
+    {
+        var sw = Switcher();
+        await sw.OpenAsync("disney");
+        _calls.Clear();
+
+        await sw.MenuAsync();
+
+        Assert.Equal(["disney.itemMenu"], _calls);
+    }
+
+    [Fact]
+    public async Task Menu_NoApp_DoesNothing()
+    {
+        var sw = Switcher();
+
+        await sw.MenuAsync();
+
+        Assert.Empty(_calls);
+    }
+
+    [Fact]
     public async Task Back_NoApp_DoesNothing()
     {
         var sw = Switcher();

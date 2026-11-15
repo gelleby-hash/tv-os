@@ -136,6 +136,21 @@ public sealed class AppSwitcher(
         }
     }
 
+    /// <summary>The remote's 3-lines key, pressed while an app is in front: the item menu in its page. Nothing on the home screen.</summary>
+    public async Task MenuAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (CurrentAppId is { } id)
+                await _views[id].OpenItemMenuAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     // Capped like the pause in LeaveAsync: a key press never returns on a hung page, and this runs inside the
     // lock that Home needs.
     private async Task PressEscapeAsync(IAppView view)

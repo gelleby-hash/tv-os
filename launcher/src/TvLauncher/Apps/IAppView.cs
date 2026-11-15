@@ -32,6 +32,12 @@ public interface IAppView
     Task DirectPauseAsync();
 
     void GoBack();
+
+    /// <summary>
+    /// Opens the page's menu for the item in focus (the remote's 3-lines key): the hover card a mouse resting on it
+    /// would open. Only pages with the arrows' script (<c>ArrowNav</c>) act on it.
+    /// </summary>
+    Task OpenItemMenuAsync();
     void Reload();
     void Show();
 

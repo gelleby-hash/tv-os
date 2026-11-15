@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace TvLauncher.Remote;
 
 /// <summary>The keys the phone remote can press: the Rii i25's own, nothing more (spec goal 2).</summary>
-public enum RemoteKey { Up, Down, Left, Right, Ok, Back, Home, PlayPause, VolumeUp, VolumeDown }
+public enum RemoteKey { Up, Down, Left, Right, Ok, Back, Home, PlayPause, VolumeUp, VolumeDown, Menu }
 
 /// <summary>A message from the phone, parsed from a text frame.</summary>
 public abstract record RemoteMessage;
@@ -38,6 +38,7 @@ public static class RemoteProtocol
         ["playPause"] = RemoteKey.PlayPause,
         ["volumeUp"] = RemoteKey.VolumeUp,
         ["volumeDown"] = RemoteKey.VolumeDown,
+        ["menu"] = RemoteKey.Menu,
     };
 
     public static RemoteMessage? Parse(string json)

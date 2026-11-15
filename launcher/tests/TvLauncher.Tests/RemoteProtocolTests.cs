@@ -15,6 +15,7 @@ public sealed class RemoteProtocolTests
     [InlineData("playPause", RemoteKey.PlayPause)]
     [InlineData("volumeUp", RemoteKey.VolumeUp)]
     [InlineData("volumeDown", RemoteKey.VolumeDown)]
+    [InlineData("menu", RemoteKey.Menu)]
     public void ParsesEachKey(string name, RemoteKey key)
     {
         var message = RemoteProtocol.Parse($$"""{"v":1,"type":"press","key":"{{name}}"}""");

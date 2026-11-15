@@ -27,8 +27,19 @@ class El {
     this.isContentEditable = false;
     this.shadowRoot = null;
     this.scrolled = null;
+    this.isConnected = true;
+    // Only what the script uses: add, remove, contains.
+    const el = this;
+    const names = () => (el.attrs.class || '').split(' ').filter(Boolean);
+    this.classList = {
+      add: (n) => { if (!names().includes(n)) el.attrs.class = names().concat(n).join(' '); },
+      remove: (n) => { el.attrs.class = names().filter(x => x !== n).join(' '); },
+      contains: (n) => names().includes(n),
+    };
   }
   add(...kids) { for (const k of kids) { k.parentElement = this; this.children.push(k); } return this; }
+  appendChild(k) { return this.add(k), k; }
+  get parentNode() { return this.parentElement; }
   getAttribute(n) { return n in this.attrs ? String(this.attrs[n]) : null; }
   hasAttribute(n) { return n in this.attrs; }
   getBoundingClientRect() { const [left, top, width, height] = this.rect; return { left, top, width, height, right: left + width, bottom: top + height }; }
@@ -75,7 +86,8 @@ function homePage({ pathname = '/en-gb/home', carousel = false } = {}) {
   const home = new El('a', { href: '/home', 'aria-label': 'Home' }, [680, 15, 100, 40]);
   const search = new El('a', { href: '/search', 'aria-label': 'Search' }, [1840, 15, 50, 40]);
   // The For You / Disney+ / hulu pills, fixed at the top centre over the page.
-  const pill = new El('a', { href: '/en-gb/browse/disneyplus', 'aria-label': 'Pill' }, [810, 85, 300, 50]);
+  // As Disney+ marks them (2026-11-15): a tab, the one shown selected.
+  const pill = new El('a', { href: '/en-gb/browse/disneyplus', 'aria-label': 'Pill', role: 'tab', 'aria-selected': 'true' }, [810, 85, 300, 50]);
   bar.add(home, search, pill);
 
   // The hero: the slide shown, and the next slide waiting beside it, outside the hero's clipping box.
@@ -145,23 +157,71 @@ function titlePage() {
   return p;
 }
 
-function run(doc, pathname, parts) {
+// Prime Video's home page as measured on 2026-11-15 in Edge at the mini PC's 1280 x 720 (300% scaling), signed in: a
+// menu bar fixed to the screen, a banner of five slides stacked in one place, each in a list item at opacity 0 but the
+// one shown, each with a link stretched behind its title and buttons (tabindex -1, no focus ring), then rows of tiles
+// (links with tabindex -1) with a small "See more" link between the rows.
+function primeHome({ shown = 'Pacers' } = {}) {
+  const body = new El('body');
+  const doc = { body, documentElement: new El('html'), activeElement: body, fullscreenElement: null, querySelectorAll: (s) => body.querySelectorAll(s),
+    elementFromPoint: () => body };
+  doc.documentElement.add(body);
+  const bar = new El('nav', {}, [0, 0, 1280, 60], { position: 'fixed' });
+  const sports = new El('a', { href: '/sports', 'data-testid': 'pv-nav-home-sports', 'aria-label': 'Sports' }, [391, 9, 74, 42]);
+  bar.add(new El('a', { href: '/home', 'aria-label': 'Home' }, [149, 9, 69, 42]), sports,
+    new El('a', { href: '/prime', 'aria-label': 'Prime' }, [548, 9, 71, 42]));
+  const slide = (name, x, title, buttons) => {
+    const li = new El('li', {}, [x, 0, 1280, 480], { opacity: name === shown ? '1' : '0' });
+    const image = new El('a', { href: '/detail/' + name, 'data-testid': 'image-link', tabindex: -1, 'aria-label': name + ' banner' }, [x, 0, 1280, 480]);
+    const link = new El('a', { href: '/detail/' + name, tabindex: -1, 'aria-label': name + ' title' }, title);
+    li.add(image, link, ...buttons.map(([tag, label, rect, testid]) => new El(tag, Object.assign({ 'aria-label': label + ' ' + name }, tag === 'a' ? { href: '/x' } : {}, testid ? { 'data-testid': testid } : {}), rect)));
+    return { li, image, link };
+  };
+  const slides = {
+    Girls: slide('Girls', 0, [44, 233, 461, 129], [['button', 'Rent', [44, 404, 151, 86]], ['button', 'Buy', [211, 404, 151, 86]],
+      ['button', 'Watchlist', [379, 417, 61, 61]], ['a', 'Details', [444, 417, 61, 61]]]),
+    Rocky: slide('Rocky', -20, [4, 264, 461, 88], [['a', 'Watch now', [4, 428, 192, 62], 'play'], ['button', 'Watchlist', [220, 429, 61, 61]],
+      ['a', 'Details', [285, 429, 61, 61]]]),
+    Pacers: slide('Pacers', 0, [44, 334, 461, 33], [['a', 'Details', [44, 428, 157, 62], 'details-cta'], ['button', 'Watchlist', [217, 429, 61, 61]]]),
+  };
+  const banner = new El('ul', {}, [0, 0, 1280, 480]).add(...Object.values(slides).map(s => s.li),
+    new El('button', { 'data-testid': 'left-arrow', 'aria-label': 'Move back' }, [6, 253, 33, 33]),
+    new El('button', { 'data-testid': 'right-arrow', 'aria-label': 'Move forward' }, [1227, 253, 33, 33]));
+  const row = (y, names) => names.map((n, i) => new El('a', { href: '/detail/' + n, tabindex: -1, 'aria-label': n }, [44 + i * 304, y, 280, 158]));
+  const top = row(621, ['LOL', 'Love in Disguise', 'The Grand Tour', 'Pingu', 'Helluva Boss']);
+  const seeMore = new El('a', { href: '/collection/action', 'data-testid': 'see-more', 'aria-label': 'See more' }, [342, 817, 114, 24]);
+  const low = row(855, ['Project Hail Mary', 'The Mongoose', 'Shelter', 'The Mask', 'Heads of State']);
+  body.add(bar, banner, ...top, seeMore, ...low);
+  return run(doc, '/region/eu/storefront', { sports, slides, top, low, seeMore }, [1280, 720]);
+}
+
+function run(doc, pathname, parts, [width, height] = [1920, 1080]) {
+  doc.head = new El('head');
+  doc.documentElement.add(doc.head);
+  doc.createElement = (tag) => new El(tag);
   const handlers = [];
   const warnings = [];
+  const scrolls = [];
   const ctx = vm.createContext({
     document: doc,
-    window: { addEventListener: (type, fn, capture) => handlers.push({ type, fn, capture }) },
+    window: { addEventListener: (type, fn, capture) => handlers.push({ type, fn, capture }), scrollBy: (o) => scrolls.push(o) },
     location: { pathname },
-    innerWidth: 1920,
-    innerHeight: 1080,
+    innerWidth: width,
+    innerHeight: height,
     getComputedStyle: (e) => e.style,
     MouseEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     KeyboardEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     PointerEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     console: { warn: (...a) => warnings.push(a) },
     Math,
+    scrollY: 0,
+    // A clock that moves on a second at each look, so presses are far apart unless a test sets page.tick.
+    performance: { now: () => (page.clock += page.tick) },
+    // Kept until a test runs them with page.runTimers().
+    setTimeout: (fn) => { page.timers.push(fn); return page.timers.length; },
   });
-  page = Object.assign({ document: doc, handlers, warnings }, parts);
+  page = Object.assign({ document: doc, handlers, warnings, scrolls, clock: 0, tick: 1000, timers: [] }, parts);
+  page.runTimers = () => { const t = page.timers.splice(0); for (const fn of t) fn(); };
   vm.runInContext(script, ctx, { filename: 'ArrowNav' });
   return page;
 }
@@ -176,9 +236,9 @@ const focused = (p) => p.document.activeElement.getAttribute('aria-label');
 
 test('arrows: listens on window, in the capture phase, so it runs before the page', () => {
   const p = homePage();
-  assert.equal(p.handlers.length, 1);
-  assert.equal(p.handlers[0].type, 'keydown');
-  assert.equal(p.handlers[0].capture, true);
+  const keys = p.handlers.filter(h => h.type === 'keydown');
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0].capture, true);
 });
 
 test('arrows: Right and Left move one tile at a time, and the page never sees the key', () => {
@@ -312,7 +372,7 @@ test('arrows: other keys and modified arrows pass through', () => {
   const shifted = press(p, 'ArrowRight');
   assert.equal(focused(p), 'A2');
   const ev = { key: 'ArrowRight', shiftKey: true, prevented: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() {} };
-  p.handlers[0].fn(ev);
+  p.handlers.find(h => h.type === 'keydown').fn(ev);
   assert.equal(ev.prevented, false);
   assert.ok(shifted.prevented);
 });
@@ -359,12 +419,12 @@ test('arrows: in the player every key still reaches the player and also nudges a
   assert.notEqual(mouse[0], mouse[1], 'a pixel apart each time, so each one is a movement');
 });
 
-test('arrows: away from the player no pointer move is made', () => {
+test('arrows: away from the player no pointer nudge is made', () => {
   const p = homePage();
   p.top.tiles[0].focus();
   press(p, 'ArrowRight');
   press(p, 'Enter');
-  assert.equal(p.document.body.events, undefined);
+  assert.ok(!(p.document.body.events || []).some(m => m.startsWith('pointermove@')));
 });
 
 test('arrows: Down from an item stretched across the page goes to the nearest item below, not the one under its middle', () => {
@@ -425,4 +485,371 @@ test('arrows: a video that is hidden, or not fixed over the page (a trailer on a
   p.video.style.position = 'static';
   assert.ok(press(p, 'ArrowUp').prevented, 'a big video in the page itself');
   assert.equal(focused(p), 'Like', 'the button over the middle of Play');
+});
+
+// On the mini PC Down from a tile went to the next row's "See more" link, and from a banner's title to its small
+// Watchlist button, skipping Watch now (2026-11-15): from the 2026-11-14 scoring on, whatever lay across from the
+// current item counted as straight ahead, so the nearest edge won.
+test('arrows: Down from a tile goes to the tile under it, not the small link between the rows', () => {
+  const p = primeHome();
+  p.top[1].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'The Mongoose');
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Love in Disguise');
+});
+
+test('arrows: Down from a banner title goes to the wide Watch now button under it, not the small button beside that', () => {
+  const p = primeHome({ shown: 'Rocky' });
+  p.slides.Rocky.link.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Watch now Rocky');
+});
+
+test('arrows: an item in a part of the page at opacity 0 (a banner slide not shown) is never chosen', () => {
+  const p = primeHome();
+  p.sports.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Pacers title', 'the slide shown, not a button of a slide stacked under it');
+});
+
+test('arrows: a link stretched behind other items (a banner image under its buttons) is never chosen, so the focus never vanishes', () => {
+  const p = primeHome();
+  press(p, 'ArrowDown');
+  assert.ok(!focused(p).endsWith(' banner'), 'not the first press either: ' + focused(p));
+  // With the banner just under the menu bar, the banner image is the nearest thing below the bar.
+  p.slides.Pacers.image.rect = [0, 56, 1280, 480];
+  p.sports.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Pacers title');
+  // A tile is not a backdrop: it holds nothing, and the link of a tile holding its own button is still a target.
+  const own = new El('button', { 'aria-label': 'Own button' }, [400, 880, 40, 40]);
+  p.low[1].add(own);
+  p.top[1].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'The Mongoose');
+});
+
+
+// Scrolled up, Prime's tiles pass under the menu bar fixed to the screen, so a menu link lies inside a tile's box
+// (measured 2026-11-15): that does not make the tile a backdrop.
+test('arrows: a tile scrolled under the fixed menu bar is still a target, though a menu link lies inside its box', () => {
+  const p = primeHome();
+  // Scrolled that far, the banner and the "See more" link are out of the way.
+  Object.values(p.slides).forEach(s => { s.li.style.opacity = '0'; });
+  p.seeMore.style.display = 'none';
+  p.top.forEach(t => { t.rect = [t.rect[0], -100, 280, 158]; });
+  p.low.forEach(t => { t.rect = [t.rect[0], 140, 280, 158]; });
+  p.low[1].focus();
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Love in Disguise');
+});
+
+// Prime's title page under the buttons (measured 2026-11-15 at 1920 x 1080): the season selector, a checkbox moved
+// far off the screen and drawn by its label, then the Episodes, Related and Details tabs.
+function seasonPage() {
+  const p = titlePage();
+  const label = new El('label', { for: 'season', 'aria-hidden': 'true' }, [72, 966, 154, 48]);
+  const box = new El('input', { id: 'season', role: 'button', 'aria-haspopup': 'listbox', 'aria-label': 'Season selector' }, [-99927, 966, 13, 13]);
+  box.type = 'checkbox';
+  box.labels = [label];
+  box.click = function () { this.clicks = (this.clicks || 0) + 1; };
+  const episodes = new El('button', { role: 'tab', 'aria-label': 'Episodes' }, [72, 1014, 82, 66]);
+  p.document.body.add(new El('div', {}, [72, 966, 154, 48]).add(box, label), episodes);
+  return Object.assign(p, { label, box, episodes });
+}
+
+test('arrows: Up from a tab under a wide button goes to that button, not past it to the small buttons above', () => {
+  const p = titlePage();
+  const episodes = new El('button', { role: 'tab', 'aria-label': 'Episodes' }, [72, 1014, 82, 66]);
+  p.document.body.add(episodes);
+  episodes.focus();
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Go ad free');
+});
+
+test('arrows: a checkbox moved off the screen and drawn by its label is reached by its label, and OK ticks it', () => {
+  const p = seasonPage();
+  p.episodes.focus();
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Season selector');
+  assert.ok(p.label.scrolled, 'the label is scrolled into view, not the box far off the screen');
+  const ok = press(p, 'Enter');
+  assert.equal(p.box.clicks, 1, 'OK ticks it, as Space would');
+  assert.ok(ok.prevented && ok.stopped);
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Episodes');
+  press(p, 'Enter');
+  assert.equal(p.box.clicks, 1, 'OK anywhere else is left to the page');
+});
+
+// A mouse pointer resting over the page: as the arrows scroll the page, Prime Video's tiles pass under it and open
+// their hover cards, which took the focus from the tile the arrows had reached (to the page body, so the next press
+// started again at the top) and made the rows grow (measured 2026-11-15 in the dev launcher and in Edge).
+const mouse = (p, x, y) => { for (const h of p.handlers) if (h.type === 'mousemove') h.fn({ screenX: x, screenY: y, isTrusted: true }); };
+const ignoresPointer = (p) => p.document.documentElement.classList.contains('tv-keys')
+  && p.document.head.children.some(s => /html\.tv-keys \* \{ pointer-events: none !important; \}/.test(s.textContent || ''));
+
+test('arrows: while the arrows are in use the page ignores a mouse pointer resting over it', () => {
+  const p = primeHome();
+  assert.equal(ignoresPointer(p), false, 'not before any key');
+  press(p, 'ArrowDown');
+  assert.equal(ignoresPointer(p), true);
+  press(p, 'ArrowDown');
+  assert.equal(p.document.head.children.length, 1, 'one style, however many keys');
+});
+
+test('arrows: moving the mouse gives the page the pointer back; a mouse event that does not move does not', () => {
+  const p = primeHome();
+  mouse(p, 500, 400);
+  press(p, 'ArrowDown');
+  mouse(p, 500, 400);
+  assert.equal(ignoresPointer(p), true, 'the pointer did not move');
+  mouse(p, 503, 400);
+  assert.equal(p.document.documentElement.classList.contains('tv-keys'), false);
+  press(p, 'ArrowDown');
+  assert.equal(ignoresPointer(p), true, 'and the arrows take it again');
+});
+
+test('arrows: the player keeps the pointer, which shows its controls', () => {
+  const p = titlePage();
+  p.trailer.focus();
+  press(p, 'ArrowDown');
+  assert.equal(ignoresPointer(p), true);
+  p.showPlayer();
+  press(p, ' ');
+  assert.equal(p.document.documentElement.classList.contains('tv-keys'), false);
+});
+
+// Prime Video adds rows only as the page nears its end. Pressing quickly, Down from the last row there was went to
+// the footer's link some 3,900 px further down, out of sight, and the rows then loaded between (measured 2026-11-15).
+test('arrows: Up and Down never jump more than a screen; with nothing nearer the page scrolls on and the focus stays', () => {
+  const p = primeHome();
+  const footer = new El('a', { href: '/terms', 'aria-label': 'Terms' }, [550, 4500, 171, 19]);
+  p.document.body.add(footer);
+  p.low[1].focus();
+  const ev = press(p, 'ArrowDown');
+  assert.equal(focused(p), 'The Mongoose', 'the focus stays');
+  assert.ok(ev.prevented, 'and the page does not scroll by itself');
+  assert.equal(p.scrolls.length, 1);
+  assert.ok(p.scrolls[0].top > 0 && p.scrolls[0].top <= 720 / 2, 'the page is scrolled down a little: ' + JSON.stringify(p.scrolls[0]));
+  footer.rect = [550, 1200, 171, 19];
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Terms', 'within a screen it is reached as usual');
+  assert.equal(p.scrolls.length, 1);
+});
+
+
+// Down reached the footer while it was the end of the page; Prime then added rows above it, so the focus sat some
+// 3,400 px below the screen and the next presses only scrolled toward it (measured 2026-11-15).
+test('arrows: with the focus far out of sight (the page grew under it), a press starts again from what is on screen', () => {
+  const fresh = primeHome();
+  press(fresh, 'ArrowDown');
+  const p = primeHome();
+  const footer = new El('a', { href: '/terms', 'aria-label': 'Terms' }, [550, 4500, 171, 19]);
+  p.document.body.add(footer);
+  footer.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), focused(fresh), 'as the first press on that screen');
+  assert.equal(p.scrolls.length, 0);
+});
+
+test('arrows: an item just out of sight, such as the next tile of a row while it slides in, is still where a press starts', () => {
+  const p = homePage();
+  p.top.tiles[5].focus();   // A6, off the right edge of the screen
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'A7');
+});
+
+// A held arrow repeats every 30 ms or so, and quick presses come faster than a smooth scroll: the focus ran ahead of
+// the screen, and the rule that starts again from the screen when the focus is far out of sight sent Up round in a
+// circle for two seconds (the owner's test in the dev launcher, 2026-11-15 17:37:31).
+test('arrows: the focus running ahead of the scroll is still where the next press starts', () => {
+  const p = primeHome();
+  const more = [1089, 1323, 1557].map((y, i) => new El('a', { href: '/r' + i, tabindex: -1, 'aria-label': 'Row ' + (i + 3) }, [348, y, 280, 158]));
+  p.document.body.add(...more);
+  p.top[1].focus();
+  for (let i = 0; i < 4; i++) press(p, 'ArrowDown');   // the fake page never scrolls: Row 5 is far below the screen
+  assert.equal(focused(p), 'Row 5');
+});
+
+test('arrows: the page growing under the focus the arrows put there still counts as out of sight', () => {
+  const fresh = primeHome();
+  press(fresh, 'ArrowDown');
+  const p = primeHome();
+  const footer = new El('a', { href: '/terms', 'aria-label': 'Terms' }, [400, 1100, 171, 19]);
+  p.document.body.add(footer);
+  p.low[1].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Terms', 'the end of the page, for now');
+  footer.rect = [400, 4500, 171, 19];   // rows added above it
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), focused(fresh));
+});
+
+test('arrows: a lone press scrolls smoothly; a quick one, or a held key, scrolls at once so the screen keeps up', () => {
+  const p = homePage();
+  p.top.tiles[0].focus();
+  press(p, 'ArrowRight');
+  assert.equal(p.top.tiles[1].scrolled.behavior, 'smooth');
+  p.tick = 120;
+  press(p, 'ArrowRight');
+  assert.equal(p.top.tiles[2].scrolled.behavior, 'instant');
+  p.tick = 1000;
+  press(p, 'ArrowRight');
+  assert.equal(p.top.tiles[3].scrolled.behavior, 'smooth');
+});
+
+
+// Prime's episode cards (measured 2026-11-15 on The Legend of Vox Machina at 1920 x 1080): each one's only target is
+// its play link, laid over the picture at opacity 0 (Prime fades it in under the pointer). Its tiles carry a hover
+// button at opacity 0 too, which is not a target.
+test('arrows: a link at opacity 0 laid over a card is a target; a button at opacity 0 is not', () => {
+  const p = seasonPage();
+  const play = new El('a', { href: '/detail/x?autoplay=1', 'data-testid': 'episodes-playbutton', role: 'button', 'aria-label': 'Play episode 1' }, [72, 1168, 422, 238], { opacity: '0' });
+  const hover = new El('button', { 'aria-label': 'Hover card' }, [518, 1168, 422, 238], { opacity: '0' });
+  p.document.body.add(new El('li', {}, [72, 1144, 422, 406]).add(play), hover);
+  p.episodes.focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Play episode 1');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Play episode 1', 'not the hover button beside it');
+});
+
+// With nothing under the Episodes tab that the arrows saw, Down scrolled the page until the tab lay above the menu
+// bar fixed to the screen, and then went into the bar; the next Down came back to the page (the owner's test,
+// 2026-11-15 17:42:31).
+test('arrows: Down never goes from the page into a bar fixed to the screen', () => {
+  const p = primeHome();
+  const walk = (e) => { for (const k of e.children) { if (k.style.position !== 'fixed') { k.rect = [k.rect[0], k.rect[1] - 3000, k.rect[2], k.rect[3]]; walk(k); } } };
+  walk(p.document.body);
+  p.top[1].rect = [348, -213, 280, 158];   // scrolled up past the bar
+  p.top[1].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Love in Disguise');
+  assert.equal(p.scrolls.length, 1, 'the page moves on instead');
+  // Down from the bar into the page: the test of the banner slides at opacity 0 (Sports, then the Pacers title).
+});
+
+// Prime's title page fades its details (title, buttons, season selector) out a few seconds after its trailer starts,
+// and brings them back on activity. The arrows took every key before Prime saw it, so the details stayed hidden and
+// at opacity 0 nothing could take the focus (owner, 2026-11-15; a scripted mouse move brings them back, measured).
+test('arrows: every arrow tells the page someone is there, with a scripted mouse move that keeps the remote mode', () => {
+  const p = primeHome();
+  mouse(p, 500, 400);
+  p.top[1].focus();
+  press(p, 'ArrowDown');
+  assert.ok((p.document.body.events || []).some(m => m.startsWith('mousemove@')), 'a mouse move on the page');
+  for (const h of p.handlers) if (h.type === 'mousemove') h.fn({ screenX: 0, screenY: 0, isTrusted: false });
+  assert.equal(ignoresPointer(p), true, 'a scripted move is not the mouse moving');
+});
+
+// With an episode focused, Prime opens its focus card, which puts the episode's Download button in the picture's top
+// right corner: Up and Down from the episode went to it (owner's test, 2026-11-15 18:39).
+function episodesPage() {
+  const p = seasonPage();
+  const related = new El('button', { role: 'tab', 'aria-label': 'Related' }, [182, 1014, 71, 66]);
+  const details = new El('button', { role: 'tab', 'aria-label': 'Details' }, [281, 1014, 65, 66]);
+  p.episodes.attrs['aria-selected'] = 'true';
+  related.attrs['aria-selected'] = 'false';
+  details.attrs['aria-selected'] = 'false';
+  const ep = (n, x, y) => new El('li', {}, [x, y - 24, 426, 406]).add(
+    new El('a', { href: '/play/' + n, 'data-testid': 'episodes-playbutton', 'aria-label': 'Episode ' + n }, [x, y, 426, 240]),
+    new El('a', { href: 'web+primevideo://' + n, 'aria-label': 'Download ' + n }, [x + 370, y + 8, 48, 48], { display: 'none' }));
+  p.document.body.add(related, details, ep(1, 72, 1168), ep(2, 522, 1168), ep(5, 72, 1600), ep(6, 522, 1600));
+  // Only the episode in focus shows its Download button, in its focus card.
+  const all = (label) => p.document.body.querySelectorAll('*').find(e => e.getAttribute('aria-label') === label)
+    || [...function* walk(e) { for (const k of e.children) { yield k; yield* walk(k); } }(p.document.body)].find(e => e.getAttribute('aria-label') === label);
+  p.open = (n) => { all('Download ' + n).style.display = 'block'; all('Episode ' + n).focus(); };
+  return p;
+}
+
+test('arrows: an item laid over the one in focus (a button in its corner) is not above, below or beside it', () => {
+  const p = episodesPage();
+  const find = (label) => p.document.body.querySelectorAll('*').find(e => e.getAttribute('aria-label') === label);
+  p.open(1);
+  press(p, 'ArrowUp');
+  assert.notEqual(focused(p), 'Download 1');
+  p.open(1);
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Episode 2', 'not its own Download button on the way');
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Episode 6');
+});
+
+test('arrows: Up or Down into a row of tabs lands on the selected tab', () => {
+  const p = episodesPage();
+  const find = (label) => p.document.body.querySelectorAll('*').find(e => e.getAttribute('aria-label') === label);
+  p.open(2);
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Episodes');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Related', 'along the tabs, one at a time as before');
+});
+
+// The remote's 3-lines key (the launcher sends 'tv-menu'): Prime Video's hover card, with Resume, the trailer, its
+// watchlist and hide buttons, opens only under a mouse resting on a tile (owner, 2026-11-15). Measured: a scripted
+// hover opens it within 200 ms, and a scripted leave closes it.
+function hoverPage() {
+  const p = primeHome();
+  const tile = p.top[1];   // Love in Disguise, 348,621 280x158
+  const card = [
+    new El('a', { href: '/detail/love', 'aria-label': 'Card picture' }, [330, 600, 320, 180]),
+    new El('a', { href: '/play/love', 'aria-label': 'Resume' }, [368, 790, 200, 50]),
+    new El('button', { 'aria-label': 'Trailer' }, [580, 790, 50, 50]),
+  ];
+  for (const c of card) c.style.display = 'none';
+  p.document.body.add(...card, new El('a', { href: '/beside', 'aria-label': 'Beside' }, [100, 790, 100, 50]));
+  tile.dispatchEvent = function (e) {
+    (this.events = this.events || []).push(e.type);
+    if (e.type === 'mouseover') for (const c of card) c.style.display = 'block';
+    if (e.type === 'mouseleave') for (const c of card) c.style.display = 'none';
+    return true;
+  };
+  return Object.assign(p, { tile, card });
+}
+const menu = (p) => { for (const h of p.handlers) if (h.type === 'tv-menu') h.fn(new Event('tv-menu')); };
+
+test('arrows: the menu key hovers the item in focus and moves the focus into the card it opens', () => {
+  const p = hoverPage();
+  p.tile.focus();
+  menu(p);
+  assert.ok(['pointerover', 'mouseover', 'mouseenter', 'mousemove'].every(t => p.tile.events.includes(t)), p.tile.events.join());
+  p.runTimers();
+  assert.equal(focused(p), 'Resume', 'the first of the card, not its picture over the tile');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Trailer');
+  assert.ok(!p.tile.events.includes('mouseleave'), 'moving inside the card keeps it open');
+});
+
+test('arrows: the menu key again closes the card and gives the focus back to the item', () => {
+  const p = hoverPage();
+  p.tile.focus();
+  menu(p);
+  p.runTimers();
+  menu(p);
+  assert.ok(['mouseout', 'mouseleave', 'pointerleave'].every(t => p.tile.events.includes(t)));
+  assert.equal(focused(p), 'Love in Disguise');
+});
+
+test('arrows: an arrow out of the card closes it', () => {
+  const p = hoverPage();
+  p.tile.focus();
+  menu(p);
+  p.runTimers();
+  press(p, 'ArrowLeft');
+  assert.equal(focused(p), 'Beside');
+  assert.ok(p.tile.events.includes('mouseleave'));
+});
+
+test('arrows: the menu key on an item with no hover card leaves things as they were', () => {
+  const p = primeHome();
+  p.top[0].focus();
+  menu(p);
+  p.runTimers();
+  assert.equal(focused(p), 'LOL');
+  p.document.activeElement = p.document.body;
+  menu(p);
+  p.runTimers();
+  assert.equal(p.document.activeElement, p.document.body, 'nothing focused: nothing to hover');
 });

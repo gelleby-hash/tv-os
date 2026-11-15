@@ -6,6 +6,13 @@ namespace TvLauncher.Tests;
 public sealed class PageScriptsTests
 {
     [Fact]
+    public void ItemMenu_TellsThePageAndDoesNothingElse()
+    {
+        // The arrows' script listens for it; a page without that script ignores it.
+        Assert.Equal("window.dispatchEvent(new Event('tv-menu'))", PageScripts.ItemMenu);
+    }
+
+    [Fact]
     public void IsPlaying_NeverPausesOrPlays()
     {
         // Reading must never change the player: Disney+'s player wedges on a direct pause, and play starts a video.

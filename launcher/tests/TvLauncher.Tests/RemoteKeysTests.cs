@@ -47,6 +47,7 @@ public sealed class RemoteKeysTests : IDisposable
     [InlineData(RemoteKey.PlayPause, 179)]
     [InlineData(RemoteKey.VolumeUp, 175)]
     [InlineData(RemoteKey.VolumeDown, 174)]
+    [InlineData(RemoteKey.Menu, 93)]
     public void MapsEveryKey(RemoteKey key, int expected)
     {
         // The mini PC's own setting: the remote's Home plus the keyboard's F12. The first entry is the Rii's.
@@ -74,6 +75,7 @@ public sealed class RemoteKeysTests : IDisposable
     }
 
     [Theory]
+    [InlineData(93, true)]
     [InlineData(37, true)]
     [InlineData(38, true)]
     [InlineData(39, true)]

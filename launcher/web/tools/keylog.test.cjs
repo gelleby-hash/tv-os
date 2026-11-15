@@ -27,7 +27,7 @@ test('key log: the first ten keys are reported with their code, the scope and wh
 test('key log: the focus is described before the page acts on the key', async () => {
   const p = await page();
   const top = p.document.querySelector('#home .focusable[data-action]');
-  p.fire(top, 'mouseover');
+  p.point(top);
   p.pressKey(40);
   assert.equal(keys(p)[0].id, 'home:' + top.dataset.action);
 });
@@ -45,3 +45,30 @@ test('key log: the first pointer move is reported once', async () => {
   p.fire(tile, 'mouseover');
   assert.equal(pointers(p).length, 1);
 });
+
+// The TV box's mouse pointer rests where Windows put it at sign-in. Edge sends a mouseover each time the page moves
+// under it (a tile grows, the row slides), and the home page gave the focus to whatever lay under the pointer, which
+// took it from the remote's arrows (owner at the TV, 2026-11-15).
+test('pointer: a mouseover with no mouse moving leaves the focus where the arrows put it', async () => {
+  const p = await page();
+  const before = p.focused();
+  const weather = p.$('weather');
+  p.fire(weather, 'mouseover');
+  assert.equal(p.focused(), before, 'a resting pointer takes nothing');
+  p.fire(weather, 'mousemove', { isTrusted: true, screenX: 900, screenY: 500 });
+  p.fire(weather, 'mousemove', { isTrusted: true, screenX: 900, screenY: 500 });
+  p.fire(weather, 'mouseover');
+  assert.equal(p.focused(), before, 'a mouse event with the pointer where it was is not a move');
+});
+
+test('pointer: a moving mouse takes the focus, and a key gives it back to the arrows', async () => {
+  const p = await page();
+  const weather = p.$('weather');
+  p.point(weather);
+  assert.equal(p.focused(), weather);
+  p.pressKey(39);
+  const after = p.focused();
+  p.fire(weather, 'mouseover');
+  assert.equal(p.focused(), after, 'after a key the resting pointer takes nothing');
+});
+

@@ -53,6 +53,9 @@ public partial class MainWindow : Window
     private HostBridge? _bridge;
     private LocationCoordinator? _location;
     private KeyboardHook? _hook;
+    private PointerPark? _park;
+    private AirMouse? _airMouse;
+    private RawMouseInput? _rawMouse;
     private RemoteServer? _remote;
     private PhoneMicSession? _mic;
     private IKeyPresser? _presser;
@@ -96,6 +99,7 @@ public partial class MainWindow : Window
             {
                 KeepAskingForFront();
                 await StartAsync();
+                _park?.Park();
             };
         }
     }
@@ -116,15 +120,38 @@ public partial class MainWindow : Window
             _bridge.AppMoveRequested += (id, to) => OnAppsRequest(id, _layout.Move(id, to), closeView: false);
             _bridge.AppShowRequested += (id, on) => OnAppsRequest(id, _layout.Show(id, on), closeView: !on);
             _bridge.AppVersionRequested += OnAppVersionRequested;
-            _hook = new KeyboardHook(_config.HomeKeyVks, _config.BackKeyVk, _config.SwallowKeyVks);
+            _park = _config.ParkPointer ? new PointerPark(this, Log) : null;
+            if (_park is not null && _config.AirMouseDevice is { } airMouse)
+            {
+                _airMouse = new AirMouse(airMouse, new SendInputKeyPresser(Log), _config.BackKeyVk, _park.Hold);
+                try
+                {
+                    _rawMouse = new RawMouseInput(HwndSource.FromHwnd(new WindowInteropHelper(this).Handle), _airMouse.OnReport);
+                    Log($"air mouse: watching {airMouse}");
+                }
+                catch (Exception ex)
+                {
+                    Log("air mouse: not watched: " + ex.Message);
+                }
+            }
+            _hook = new KeyboardHook(_config.HomeKeyVks, _config.BackKeyVk, _config.MenuKeyVk, _config.PointerKeyVk, _config.SwallowKeyVks);
             _hook.HomePressed += OnHomePressed;
             _hook.BackPressed += OnBackPressed;
+            _hook.MenuPressed += OnMenuPressed;
+            _hook.PointerKeyPressed += OnPointerKeyPressed;
             _hook.KeyReported += (vk, injected) => Log(
                 $"key: VK {vk}{(injected ? " injected" : "")} {_sinceStart.Elapsed.TotalSeconds:0.0} s after the start; "
                 + _windows.Keyboard(new WindowInteropHelper(this).Handle));
             _hook.ReportKeys(KeysToReport);
             // Hidden by the desktop button (PowerActions.ShowDesktop): the desktop and VLC keep the extra keys.
-            IsVisibleChanged += (_, e) => _hook.LauncherInFront = (bool)e.NewValue;
+            IsVisibleChanged += (_, e) =>
+            {
+                _hook.LauncherInFront = (bool)e.NewValue;
+                if (_airMouse is not null)
+                    _airMouse.LauncherInFront = (bool)e.NewValue;
+                if (!(bool)e.NewValue)
+                    _park?.Hide();
+            };
             var location = _location = new LocationCoordinator(
                 new WindowsLocation(),
                 _config.Location is { } place ? Coordinates.Rounded(place.Latitude, place.Longitude) : null,
@@ -218,6 +245,19 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Log("Back failed: " + ex.Message);
+        }
+    }
+
+    // Raised only while an app is in front, like Back.
+    private async void OnMenuPressed(object? sender, EventArgs e)
+    {
+        try
+        {
+            await _switcher!.MenuAsync();
+        }
+        catch (Exception ex)
+        {
+            Log("Menu failed: " + ex.Message);
         }
     }
 
@@ -365,6 +405,13 @@ public partial class MainWindow : Window
         if (_location is { TurnOnPending: true } location)
             RunLocation(location.FinishTurnOnAsync);
         OnAppChanged();
+        // Home ends an emergency use of the remote's air mouse.
+        if (_airMouse is { Free: true })
+        {
+            _airMouse.Free = false;
+            Log("air mouse: parked again (Home)");
+        }
+        _park?.Park();
     }
 
     // Called by AppSwitcher before it shows an app: a WebView2 is a window of its own, so the home page is
@@ -384,6 +431,21 @@ public partial class MainWindow : Window
         // AppSwitcher.OpenAsync names the app in front only after this returns, in the same run on this
         // thread, so the state goes once that run is done.
         Dispatcher.InvokeAsync(OnAppChanged);
+        // Not while the remote's air mouse is free: it is pointing at something.
+        if (_airMouse is not { Free: true })
+            _park?.Park();
+    }
+
+    // The emergency key (the Rii's Search): the remote's air mouse is an ordinary mouse until the key is pressed
+    // again, or Home is. Nothing without AirMouseDevice.
+    private void OnPointerKeyPressed(object? sender, EventArgs e)
+    {
+        if (_airMouse is null)
+            return;
+        _airMouse.Free = !_airMouse.Free;
+        Log(_airMouse.Free ? "air mouse: free" : "air mouse: parked again");
+        if (!_airMouse.Free)
+            _park?.Park();
     }
 
     private async void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -716,6 +778,7 @@ public partial class MainWindow : Window
         // thread its handlers queue work to, could hang the close. The connections end with the process.
         _ = _remote?.DisposeAsync().AsTask();
         _hook?.Dispose();
+        _rawMouse?.Dispose();
         _webView?.Dispose();
     }
 

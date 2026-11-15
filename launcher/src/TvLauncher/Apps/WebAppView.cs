@@ -172,6 +172,8 @@ public sealed class WebAppView : IAppView
 
     public void GoBack() => Core.GoBack();
 
+    public Task OpenItemMenuAsync() => Core.ExecuteScriptAsync(PageScripts.ItemMenu);
+
     // After a failed load the view holds the browser's error page for whatever address failed, so it opens the
     // app's own address again rather than reloading that.
     public void Reload()

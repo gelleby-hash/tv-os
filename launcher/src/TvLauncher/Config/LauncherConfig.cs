@@ -86,6 +86,8 @@ public sealed class LauncherConfig
     /// <summary>Keys the hook keeps from Windows while the launcher is in front (the remote's Search and menu buttons).</summary>
     public IReadOnlyList<int> SwallowKeyVks { get; }
     public int BackKeyVk { get; }
+    /// <summary>The key that opens the item menu in the app in front (the remote's 3-lines button).</summary>
+    public int MenuKeyVk { get; }
     public bool RequireHdr { get; }
     public WeatherLocation? Location { get; }
     public PhoneRemoteSettings PhoneRemote { get; }
@@ -95,6 +97,15 @@ public sealed class LauncherConfig
     public int BackgroundRotateSeconds { get; }
     /// <summary>How long the home screen's animations take: 1 is the normal, snappy speed, 2 twice as long.</summary>
     public double MotionTime { get; }
+    /// <summary>Whether the launcher keeps the mouse pointer on a small spot of its own in the screen's corner (the mini PC).</summary>
+    public bool ParkPointer { get; }
+    /// <summary>
+    /// Part of the raw input name of the remote's dongle (the Rii i25's is <c>VID_1997&amp;PID_2433</c>), whose air
+    /// mouse is kept on the parked spot and whose clicks count as OK and Back; null for none. Only with <see cref="ParkPointer"/>.
+    /// </summary>
+    public string? AirMouseDevice { get; }
+    /// <summary>The key that frees the remote's air mouse in an emergency, and parks it again (the Rii's Search).</summary>
+    public int PointerKeyVk { get; }
     /// <summary>Whether Alt+F4 may close the launcher. Off unless set: the family must not close the TV's home screen by accident.</summary>
     public bool AllowClose { get; }
     public IReadOnlyList<string> SpotlightFolders { get; }
@@ -106,6 +117,7 @@ public sealed class LauncherConfig
         HomeKeyVks = homeKeys;
         SwallowKeyVks = swallowKeys;
         BackKeyVk = raw.BackKeyVk;
+        MenuKeyVk = raw.MenuKeyVk;
         RequireHdr = raw.RequireHdr;
         Location = location;
         PhoneRemote = phoneRemote;
@@ -115,6 +127,9 @@ public sealed class LauncherConfig
         BackgroundRotateSeconds = raw.BackgroundRotateSeconds;
         MotionTime = raw.MotionTime;
         AllowClose = raw.AllowClose;
+        ParkPointer = raw.ParkPointer;
+        AirMouseDevice = string.IsNullOrWhiteSpace(raw.AirMouseDevice) ? null : raw.AirMouseDevice.Trim();
+        PointerKeyVk = raw.PointerKeyVk;
         SpotlightFolders = raw.SpotlightFolders!.Select(f => Environment.ExpandEnvironmentVariables(f!)).ToList();
         LogPath = Environment.ExpandEnvironmentVariables(raw.LogPath);
     }
@@ -304,6 +319,8 @@ public sealed class LauncherConfig
         public JsonElement? SwallowKeyVks { get; set; }
         // VK_BROWSER_BACK: what the Rii i25's Back key sends (measured 2026-10-26).
         public int BackKeyVk { get; set; } = 166;
+        // VK_APPS: what the Rii i25's 3-lines key sends (measured 2026-10-26).
+        public int MenuKeyVk { get; set; } = 93;
         public bool RequireHdr { get; set; } = true;
         public RawLocation? Location { get; set; }
         public RawPhoneRemote? PhoneRemote { get; set; }
@@ -313,6 +330,11 @@ public sealed class LauncherConfig
         public int BackgroundRotateSeconds { get; set; } = 60;
         public double MotionTime { get; set; } = 1;
         public bool AllowClose { get; set; }
+        // Off unless set: it moves the pointer, which a PC used with a mouse does not want.
+        public bool ParkPointer { get; set; }
+        public string? AirMouseDevice { get; set; }
+        // VK_BROWSER_SEARCH: what the Rii i25's Search key sends (measured 2026-10-26 and 2026-11-15).
+        public int PointerKeyVk { get; set; } = 170;
         public List<string?>? SpotlightFolders { get; set; } = new();
         public string LogPath { get; set; } = DefaultLogPath;
     }

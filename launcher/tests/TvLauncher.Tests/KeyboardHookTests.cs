@@ -14,7 +14,7 @@ public sealed class KeyboardHookTests
     private static readonly int[] ExtraKeys = [VkBrowserSearch, VkApps];
 
     private static bool Swallow(int vkCode, bool appInFront = false, bool launcherInFront = true, int[]? homeKeys = null) =>
-        KeyboardHook.ShouldSwallow(homeKeys ?? HomeKeys, VkBrowserBack, ExtraKeys, appInFront, launcherInFront, vkCode);
+        KeyboardHook.ShouldSwallow(homeKeys ?? HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, ExtraKeys, appInFront, launcherInFront, vkCode);
 
     [Fact]
     public void ShouldSwallow_ConfiguredHomeKey_Always()
@@ -45,6 +45,23 @@ public sealed class KeyboardHookTests
         // On the home screen Back reaches the page, which closes an overlay with it.
         Assert.False(Swallow(VkBrowserBack, appInFront: false));
         Assert.True(Swallow(VkBrowserBack, appInFront: true));
+    }
+
+    [Fact]
+    public void ShouldSwallow_MenuWhileAppInFront_EvenWhenNotAnExtraKey()
+    {
+        // The 3-lines key opens the item menu in the app in front (2026-11-15), so it never reaches the app as a key.
+        Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], true, true, VkApps));
+        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, true, VkApps));
+    }
+
+    [Fact]
+    public void ShouldSwallow_PointerKeyWhileLauncherInFront_EvenWhenNotAnExtraKey()
+    {
+        // The Search key frees and parks the remote's air mouse (2026-11-15), on the home screen and in an app alike.
+        foreach (var appInFront in new[] { false, true })
+            Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], appInFront, true, VkBrowserSearch));
+        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, false, VkBrowserSearch));
     }
 
     [Fact]
