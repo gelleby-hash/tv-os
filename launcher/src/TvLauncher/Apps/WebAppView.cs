@@ -119,6 +119,7 @@ public sealed class WebAppView : IAppView
         // A page asking for full screen is left to fill this view: the window already fills the screen.
         core.NewWindowRequested += OnNewWindowRequested;
         core.WindowCloseRequested += OnWindowCloseRequested;
+        core.NavigationStarting += OnNavigationStarting;
         core.NavigationCompleted += OnNavigationCompleted;
         core.ProcessFailed += OnProcessFailed;
         await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.HideScrollbars);
@@ -309,14 +310,29 @@ public sealed class WebAppView : IAppView
     private CoreWebView2 Core =>
         _core ?? throw new InvalidOperationException($"The {_entry.Name} view has no browser (not started, or its browser process ended).");
 
+    /// <summary>Only http and https: anything else (an app's own scheme, mailto) would be handed to another program.</summary>
+    internal static bool IsWebAddress(string uri) =>
+        Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && (parsed.Scheme == Uri.UriSchemeHttps || parsed.Scheme == Uri.UriSchemeHttp);
+
     // Pop-ups, such as a sign-in page, open in this view: there is no other window to show them in.
     private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
     {
         e.Handled = true;
-        if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
+        if (IsWebAddress(e.Uri))
             _core?.Navigate(e.Uri);
         else
             _log($"view {Id}: a new window that is not a web address was ignored");
+    }
+
+    // A link to an app's own scheme, such as Prime Video's Download (web+primevideo:), would make WebView2 ask
+    // "This site is trying to open ..." and fail the navigation; the launcher then hid the page and the prompt with it,
+    // and the hidden prompt kept the keyboard. Cancelled here, the page stays as it was and nothing opens.
+    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    {
+        if (IsWebAddress(e.Uri))
+            return;
+        e.Cancel = true;
+        _log($"view {Id}: a link that is not a web address was ignored");
     }
 
     // For example YouTube's "Exit YouTube?" answered yes.
@@ -408,6 +424,7 @@ public sealed class WebAppView : IAppView
             {
                 core.NewWindowRequested -= OnNewWindowRequested;
                 core.WindowCloseRequested -= OnWindowCloseRequested;
+                core.NavigationStarting -= OnNavigationStarting;
                 core.NavigationCompleted -= OnNavigationCompleted;
                 core.ProcessFailed -= OnProcessFailed;
                 core.WebMessageReceived -= OnWebMessageReceived;

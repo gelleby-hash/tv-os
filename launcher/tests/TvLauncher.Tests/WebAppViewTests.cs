@@ -160,5 +160,21 @@ public sealed class WebAppViewTests
         Assert.False(WebAppView.ShowsLoadFailure(true, CoreWebView2WebErrorStatus.Unknown, 0));
     }
 
+    // Prime Video's Download button links to its Windows app (2026-11-15): WebView2 then asks "This site is trying to
+    // open Prime Video", a prompt the launcher hid behind its "Couldn't open" message and which held the keyboard.
+    [Theory]
+    [InlineData("https://www.primevideo.com/detail/B0HB2WKC45", true)]
+    [InlineData("http://example.com/", true)]
+    [InlineData("about:blank", false)]
+    [InlineData("web+primevideo://app.primevideo.com/detail?gti=x&action=download", false)]
+    [InlineData("mailto:someone@example.com", false)]
+    [InlineData("ms-settings:privacy-location", false)]
+    [InlineData("not an address", false)]
+    [InlineData("", false)]
+    public void IsWebAddress(string uri, bool expected)
+    {
+        Assert.Equal(expected, WebAppView.IsWebAddress(uri));
+    }
+
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement;
 }
