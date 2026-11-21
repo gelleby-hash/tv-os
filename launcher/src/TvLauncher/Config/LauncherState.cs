@@ -22,6 +22,11 @@ public sealed record LauncherState(bool BoostOn, LocationChoice? Location = null
                 return new LauncherState(boostOn, ReadChoice(raw.Location), ReadPoint(raw.LastWindows), ReadApps(raw.Apps));
             log?.Invoke($"state: {path} has no BoostOn value, using the defaults");
         }
+        // Written only once something changes (Save), so a launcher nobody has changed has none: not a failure.
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            log?.Invoke($"state: none saved yet ({path}), using the defaults");
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             log?.Invoke($"state: could not read {path} ({ex.GetType().Name}: {ex.Message}), using the defaults");

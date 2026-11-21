@@ -23,6 +23,22 @@ public sealed class LauncherStateTests : IDisposable
         Assert.Single(logged);
     }
 
+    // The file is written only once the family changes something, so a box nobody changed has none. Logged as a
+    // read failure, that looked like lost settings (the box's log, 2026-11-21: 50 starts, never a file).
+    [Theory]
+    [InlineData("state.json")]
+    [InlineData("no-such-folder\\state.json")]
+    public void State_NeverSaved_IsLoggedAsNoneSavedYet_NotAsAFailure(string relative)
+    {
+        var path = Path.Combine(_dir, relative);
+        var logged = new List<string>();
+
+        LauncherState.Load(path, logged.Add);
+
+        var line = Assert.Single(logged);
+        Assert.Equal($"state: none saved yet ({path}), using the defaults", line);
+    }
+
     [Fact]
     public void State_Corrupt_BoostOn()
     {
@@ -33,7 +49,7 @@ public sealed class LauncherStateTests : IDisposable
         var state = LauncherState.Load(path, logged.Add);
 
         Assert.True(state.BoostOn);
-        Assert.Single(logged);
+        Assert.StartsWith("state: could not read ", Assert.Single(logged));
     }
 
     [Theory]
