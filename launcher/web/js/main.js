@@ -14,7 +14,7 @@
   // is for ('' when there is no place), so an answer for a place the viewer has left is ignored.
   var place = null, weatherKey = '';
   var weather = null;
-  var weatherError = null, lastAttempt = 0;
+  var weatherError = null, lastAttempt = 0, backupFor = '';
   var allApps = [], shownApps = [];
   var ROW = window.TVRow;
   // The row picked up in the Apps panel to be moved (its app id), or null.
@@ -167,7 +167,7 @@
   function renderSky(now) {
     var ph = phase(now), cur = weather ? W.nowFor(weather, Date.now()) : null;
     var d = cur ? W.describe(cur.code) : { kind: 'clear', intensity: 0 };
-    var cloud = cur ? cur.cloud : 0.1;
+    var cloud = cur && cur.cloud != null ? cur.cloud : 0.1;
     var key = [ph, Math.round(cloud * 10), d.kind, now.getDate()].join('|');
     if (key !== skyKey) {
       skyKey = key;
@@ -271,8 +271,10 @@
   function refreshWeather(force) {
     if (!weatherKey) return;
     var age = weather ? Date.now() - weather.fetchedAt : Infinity;
-    var due = force || age > CFG.weatherRefreshMinutes * 60e3;
-    var backoff = weatherError ? 2 * 60e3 : 0;
+    var fromBackup = !!weather && weather.source === 'metno';
+    var due = force || fromBackup || age > CFG.weatherRefreshMinutes * 60e3;
+    // While MET Norway's forecast is shown Open-Meteo is tried again on the short rhythm, not the 15 minute refresh.
+    var backoff = weatherError || fromBackup ? 2 * 60e3 : 0;
     if (!due || Date.now() - lastAttempt < backoff) return;
     lastAttempt = Date.now();
     var asked = weatherKey;
@@ -282,8 +284,27 @@
     }).catch(function (e) {
       if (asked !== weatherKey) return;
       weatherError = e; renderWeather();
+      // A blip with a fresh forecast on screen changes nothing; with none, or one over an hour old, MET Norway's is asked for.
+      if (CFG.weatherBackup && (!weather || Date.now() - weather.fetchedAt > 3600e3)) {
+        var r = W.rounded(place);
+        backupFor = asked;
+        H.post({ type: 'weatherBackup', latitude: r.latitude, longitude: r.longitude });
+      }
     });
   }
+
+  // The host's answer with MET Norway's forecast. A failed ask changes nothing. An answer for a place no longer shown, or one
+  // older than the Open-Meteo forecast now on screen, is dropped.
+  H.on('weatherBackup', function (msg) {
+    if (!msg || !msg.ok || !msg.raw || !weatherKey || backupFor !== weatherKey) return;
+    var fetchedAt = typeof msg.fetchedAt === 'number' ? msg.fetchedAt : Date.now();
+    if (weather && weather.source !== 'metno' && weather.fetchedAt >= fetchedAt) return;
+    var w;
+    try { w = W.saveMetNorway(msg.raw, fetchedAt, place); } catch (e) { return; }
+    weather = w;
+    renderAll();
+    if (!$('forecast').hidden) renderForecast();
+  });
 
   // When the internet comes back the weather is fetched at once, not after the refresh interval or the wait after a failure.
   function refreshWeatherNow() { lastAttempt = 0; refreshWeather(true); }
@@ -369,7 +390,8 @@
   // ---------- overlays ----------
   function renderForecast() {
     var now = new Date();
-    $('fcPlace').textContent = weather ? tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '';
+    // MET Norway's terms ask for credit where its data, processed or not, is shown.
+    $('fcPlace').textContent = weather ? tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) + (weather.source === 'metno' ? '. Based on data from MET Norway' : '') : '';
     if (!weather) { $('fcDays').innerHTML = '<div class="empty">' + tr('Weather is not available yet.') + '</div>'; $('fcTiles').innerHTML = ''; return; }
     var days = weather.daily, lo = Infinity, hi = -Infinity;
     days.forEach(function (d) { lo = Math.min(lo, d.min); hi = Math.max(hi, d.max); });

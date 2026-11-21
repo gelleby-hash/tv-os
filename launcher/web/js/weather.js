@@ -21,6 +21,11 @@
   };
 
   function describe(code) {
+    // MET Norway's forecast carries its symbol names (partlycloudy_day) where Open-Meteo carries WMO numbers.
+    if (typeof code === 'string') {
+      var m = metSymbol(code);
+      return { label: window.TVI18n ? window.TVI18n.text(m.label) : m.label, kind: m.kind, intensity: m.intensity };
+    }
     var c = CODES[code];
     var label = c ? c[0] : 'Unknown';
     return { label: window.TVI18n ? window.TVI18n.text(label) : label, kind: c ? c[1] : 'cloudy', intensity: c ? c[2] : 0 };
@@ -119,6 +124,139 @@
     };
   }
 
+  // MET Norway's symbol names ("lightrainshowersandthunder_night") as the page's kind, intensity and label. The suffix gives
+  // day or night (polar twilight counts as day). The base name is matched by these rules, the first that fits winning; a
+  // name that fits none is a cloudy sky labelled Unknown. Two of MET Norway's own names are misspelt (lightssleet...), and
+  // matching on parts of the name covers them.
+  function metSymbol(code) {
+    var name = String(code == null ? '' : code), base = name.replace(/_(day|night|polartwilight)$/, '');
+    var isDay = !/_night$/.test(name);
+    var light = base.indexOf('light') >= 0, heavy = base.indexOf('heavy') >= 0, showers = base.indexOf('showers') >= 0;
+    var amount = light ? 1 : heavy ? 3 : 2;
+    function out(label, kind, intensity) { return { label: label, kind: kind, intensity: intensity, isDay: isDay }; }
+    if (base.indexOf('thunder') >= 0) return out('Thunderstorm', 'storm', heavy ? 3 : 2);
+    if (base.indexOf('snow') >= 0) return out(showers ? 'Snow showers' : light ? 'Light snow' : heavy ? 'Heavy snow' : 'Snow', 'snow', amount);
+    if (base.indexOf('sleet') >= 0) return out('Sleet', 'snow', amount);
+    if (base.indexOf('rain') >= 0) return out(showers ? (heavy ? 'Heavy showers' : 'Showers') : light ? 'Light rain' : heavy ? 'Heavy rain' : 'Rain', 'rain', amount);
+    if (base.indexOf('fog') >= 0) return out('Fog', 'fog', 0);
+    if (base.indexOf('partlycloudy') >= 0) return out('Partly cloudy', 'partly', 0);
+    if (base.indexOf('fair') >= 0) return out('Mainly clear', 'partly', 0);
+    if (base.indexOf('clearsky') >= 0) return out('Clear', 'clear', 0);
+    if (base.indexOf('cloudy') >= 0) return out('Cloudy', 'cloudy', 0);
+    return out('Unknown', 'cloudy', 0);
+  }
+
+  // Sunrise and sunset for a place on the local calendar day of `date`, as Dates (NOAA's sunrise equation, the sun's centre
+  // 90.833 degrees from straight up). With the sun up all day or down all day they are the day's two ends, or its noon twice.
+  function sunTimes(date, lat, lon) {
+    var rad = Math.PI / 180;
+    var jd = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400e3 + 2440587.5;
+    var n = Math.ceil(jd - 2451545.0 + 0.0008);
+    var jStar = n - lon / 360;
+    var mean = (357.5291 + 0.98560028 * jStar) % 360;
+    var centre = 1.9148 * Math.sin(mean * rad) + 0.02 * Math.sin(2 * mean * rad) + 0.0003 * Math.sin(3 * mean * rad);
+    var lambda = (mean + centre + 180 + 102.9372) % 360;
+    var transit = 2451545.0 + jStar + 0.0053 * Math.sin(mean * rad) - 0.0069 * Math.sin(2 * lambda * rad);
+    var sinDec = Math.sin(lambda * rad) * Math.sin(23.4397 * rad);
+    var cosDec = Math.cos(Math.asin(sinDec));
+    var cosHour = (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * sinDec) / (Math.cos(lat * rad) * cosDec);
+    function toDate(j) { return new Date((j - 2440587.5) * 86400e3); }
+    if (cosHour >= 1) return { sunrise: toDate(transit), sunset: toDate(transit) };
+    if (cosHour <= -1) {
+      return { sunrise: new Date(date.getFullYear(), date.getMonth(), date.getDate()), sunset: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1) };
+    }
+    var half = Math.acos(cosHour) / rad / 360;
+    return { sunrise: toDate(transit - half), sunset: toDate(transit + half) };
+  }
+
+  // Worst weather first, for a day with no 12 hour symbol: storms, then snow, rain, fog, cloud, partly cloudy, clear.
+  var SEVERITY = { storm: 70, snow: 60, rain: 50, drizzle: 50, fog: 40, cloudy: 30, partly: 20, clear: 10 };
+  function severity(code) { var m = metSymbol(code); return SEVERITY[m.kind] * 10 + m.intensity; }
+
+  function sameLocalDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+
+  // MET Norway's answer (UTC times, m/s, percent) in the shape normalize returns. A value it did not give is null: gusts, rain
+  // chance and visibility are not in the complete product, and any step may lack fields. The current weather is the latest step
+  // that began by fetchedAt, the hourly list the next 24 hours, the daily list 7 days from today. `place` is the rounded place
+  // the forecast is for, which the sunrise and sunset are worked out from.
+  function fromMetNorway(raw, fetchedAt, place) {
+    var series = raw && raw.properties && raw.properties.timeseries || [];
+    var steps = [];
+    for (var i = 0; i < series.length; i++) {
+      var e = series[i], data = e && e.data || {}, inst = data.instant && data.instant.details || {};
+      var n1 = data.next_1_hours, n6 = data.next_6_hours, n12 = data.next_12_hours;
+      var sym1 = n1 && n1.summary && n1.summary.symbol_code || null, sym6 = n6 && n6.summary && n6.summary.symbol_code || null;
+      var sym12 = n12 && n12.summary && n12.summary.symbol_code || null;
+      var t = new Date(e && e.time);
+      if (isNaN(t.getTime())) continue;
+      var d1 = n1 && n1.details || {}, d6 = n6 && n6.details || {};
+      steps.push({
+        time: t, inst: inst, has1: !!n1, sym: sym1 || sym6 || sym12, sym12: sym12,
+        pop1: num(d1.probability_of_precipitation), pop6: num(d6.probability_of_precipitation),
+        rain1: num(d1.precipitation_amount), rain6: num(d6.precipitation_amount),
+        max6: num(d6.air_temperature_max), min6: num(d6.air_temperature_min)
+      });
+    }
+    function kmh(v) { return v == null ? null : v * 3.6; }
+    function isDayOf(step) {
+      if (step.sym && /_(day|night|polartwilight)$/.test(step.sym)) return metSymbol(step.sym).isDay;
+      var s = sunTimes(step.time, place.latitude, place.longitude);
+      return step.time >= s.sunrise && step.time < s.sunset;
+    }
+    var now = Date.now(), hourly = [], daily = [], cur = steps[0];
+    for (var a = 0; a < steps.length; a++) if (steps[a].time.getTime() <= fetchedAt) cur = steps[a];
+    for (var b = 0; b < steps.length && hourly.length < 24; b++) {
+      var s = steps[b];
+      if (s.time.getTime() + 3600e3 <= now) continue;
+      hourly.push({ time: s.time, temp: num(s.inst.air_temperature), code: s.sym, pop: s.pop1, isDay: isDayOf(s),
+        feels: num(s.inst.apparent_air_temperature), wind: kmh(num(s.inst.wind_speed)), humidity: num(s.inst.relative_humidity) });
+    }
+    var days = [];
+    steps.forEach(function (st) {
+      var day = days.filter(function (d) { return sameLocalDay(d.date, st.time); })[0];
+      if (!day) { day = { date: new Date(st.time.getFullYear(), st.time.getMonth(), st.time.getDate()), steps: [] }; days.push(day); }
+      day.steps.push(st);
+    });
+    days.slice(0, 7).forEach(function (day) {
+      var highs = [], lows = [], temps = [], rain = null, covered = 0, pop = null, uv = null, noon = null, worst = null;
+      var noonAt = new Date(day.date.getFullYear(), day.date.getMonth(), day.date.getDate(), 12).getTime();
+      day.steps.forEach(function (st) {
+        if (st.max6 != null) highs.push(st.max6);
+        if (st.min6 != null) lows.push(st.min6);
+        if (st.inst.air_temperature != null) temps.push(st.inst.air_temperature);
+        // Rain counts each stretch of time once: an hourly amount, or a 6 hour one where the forecast has no hourly step.
+        var t0 = st.time.getTime();
+        if (st.has1 && st.rain1 != null) { rain = (rain || 0) + st.rain1; covered = t0 + 3600e3; }
+        else if (!st.has1 && st.rain6 != null && t0 >= covered) { rain = (rain || 0) + st.rain6; covered = t0 + 6 * 3600e3; }
+        var p = st.pop1 != null ? st.pop1 : st.pop6;
+        if (p != null && (pop == null || p > pop)) pop = p;
+        var u = num(st.inst.ultraviolet_index_clear_sky);
+        if (u != null && (uv == null || u > uv)) uv = u;
+        if (st.sym12 && (!noon || Math.abs(t0 - noonAt) < Math.abs(noon.time.getTime() - noonAt))) noon = st;
+        if (st.sym && (!worst || severity(st.sym) > severity(worst))) worst = st.sym;
+      });
+      var hi = highs.length ? Math.max.apply(null, highs) : temps.length ? Math.max.apply(null, temps) : null;
+      var lo = lows.length ? Math.min.apply(null, lows) : temps.length ? Math.min.apply(null, temps) : null;
+      var sun = sunTimes(day.date, place.latitude, place.longitude);
+      daily.push({ date: day.date, code: noon ? noon.sym12 : worst, max: hi, min: lo, sunrise: sun.sunrise, sunset: sun.sunset,
+        pop: pop, uvMax: uv, rain: rain });
+    });
+    var ci = cur ? cur.inst : {};
+    return {
+      source: 'metno',
+      fetchedAt: fetchedAt,
+      current: { temp: num(ci.air_temperature), feels: num(ci.apparent_air_temperature), humidity: num(ci.relative_humidity),
+        wind: kmh(num(ci.wind_speed)), code: cur ? cur.sym : null, isDay: cur ? isDayOf(cur) : true,
+        cloud: ci.cloud_area_fraction == null ? null : ci.cloud_area_fraction / 100,
+        windDir: num(ci.wind_from_direction), gusts: kmh(num(ci.wind_speed_of_gust)), dew: num(ci.dew_point_temperature),
+        uv: num(ci.ultraviolet_index_clear_sky), visibility: null },
+      hourly: hourly,
+      daily: daily
+    };
+  }
+
   // What the weather is now, from a saved forecast. Within an hour of the fetch that is the fetched "now" reading. After
   // that it is the saved hour that contains nowMs (the last saved hour once they have run out), its values over the old
   // reading's; a value that hour lacks is null, not the old reading's. UV, visibility and the rest stay as fetched.
@@ -149,8 +287,15 @@
       for (var k = 0; saved == null && k < OLD_CACHE_KEYS.length; k++) saved = localStorage.getItem(OLD_CACHE_KEYS[k]);
       var c = JSON.parse(saved), want = rounded(loc);
       if (!c || !c.raw || !c.loc || c.loc.latitude !== want.latitude || c.loc.longitude !== want.longitude) return null;
-      return normalize(c.raw, c.fetchedAt);
+      return c.source === 'metno' ? fromMetNorway(c.raw, c.fetchedAt, c.loc) : normalize(c.raw, c.fetchedAt);
     } catch (e) { return null; }
+  }
+
+  // MET Norway's answer, kept as the saved forecast for the place and returned in the page's shape.
+  function saveMetNorway(raw, fetchedAt, place) {
+    var loc = rounded(place), w = fromMetNorway(raw, fetchedAt, loc);
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ raw: raw, fetchedAt: fetchedAt, loc: loc, source: 'metno' })); } catch (e) { /* storage full */ }
+    return w;
   }
 
   function fetchWeather(place) {
@@ -167,5 +312,5 @@
     }).finally(function () { if (timer) clearTimeout(timer); });
   }
 
-  window.TVWeather = { describe: describe, look: look, looks: LOOKS, compassName: compassName, uvCategory: uvCategory, stars: stars, fetch: fetchWeather, cached: readCache, rounded: rounded, nowFor: nowFor };
+  window.TVWeather = { describe: describe, look: look, looks: LOOKS, compassName: compassName, uvCategory: uvCategory, stars: stars, fetch: fetchWeather, saveMetNorway: saveMetNorway, metSymbol: metSymbol, sunTimes: sunTimes, fromMetNorway: fromMetNorway, cached: readCache, rounded: rounded, nowFor: nowFor };
 })();
