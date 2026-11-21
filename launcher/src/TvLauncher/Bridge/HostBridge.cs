@@ -82,8 +82,8 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
                     timing.Mark("locationPick");
                     PlacePicked?.Invoke(place);
                     break;
+                // Not logged: the page asks every couple of minutes during an outage, and the window logs the answer.
                 case "weatherBackup" when place is not null:
-                    timing.Mark("weatherBackup");
                     BackupRequested?.Invoke(place);
                     break;
                 case "locationOff":

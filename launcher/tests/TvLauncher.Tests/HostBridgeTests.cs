@@ -178,6 +178,18 @@ public sealed class HostBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task WeatherBackup_ask_is_not_logged_on_its_own()
+    {
+        // During an outage the page asks every couple of minutes; the answer's line (written by the window, and only
+        // when its status changes) says enough.
+        _bridge.BackupRequested += _ => { };
+
+        await _bridge.HandleAsync("""{"type":"weatherBackup","latitude":55.95,"longitude":-3.19}""");
+
+        Assert.DoesNotContain(LogLines(), l => l.Contains("weatherBackup"));
+    }
+
+    [Fact]
     public async Task LocationOff_RaisesWeatherOffChosen()
     {
         var chosen = 0;
