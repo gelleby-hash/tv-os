@@ -65,6 +65,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _photoTimer;
     private DispatcherTimer? _focusTimer;
     private ForegroundProbe? _probe;
+    private DisplayProbe? _displayProbe;
     private NetworkWatcher? _network;
     private WindowsNetworkSource? _networkSource;
     private IReadOnlyList<string>? _photoUrls;
@@ -484,15 +485,19 @@ public partial class MainWindow : Window
         await _bridge.HandleAsync(e.WebMessageAsJson);
     }
 
-    // Logs every change of the foreground window for ForegroundProbe.WatchFor after the start (what takes the front at a boot).
+    // Logs every change of the foreground window, and of the screens' mode and HDR state, for ForegroundProbe.WatchFor
+    // after the start (what takes the front at a boot, and whether the signal to the TV changes).
     private void WatchTheFront()
     {
-        var probe = _probe = new ForegroundProbe(new WindowInteropHelper(this).Handle, () => _sinceStart.Elapsed, Log);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var probe = _probe = new ForegroundProbe(hwnd, () => _sinceStart.Elapsed, Log);
+        var display = _displayProbe = new DisplayProbe(HwndSource.FromHwnd(hwnd), () => _sinceStart.Elapsed, Log);
         var timer = new DispatcherTimer { Interval = ForegroundProbe.WatchFor - _sinceStart.Elapsed is var left && left > TimeSpan.FromSeconds(1) ? left : TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) =>
         {
             timer.Stop();
             probe.Dispose();
+            display.Dispose();
         };
         timer.Start();
     }
@@ -854,6 +859,7 @@ public partial class MainWindow : Window
         _photoTimer?.Stop();
         _focusTimer?.Stop();
         _probe?.Dispose();
+        _displayProbe?.Dispose();
         _network?.Dispose();
         _networkSource?.Dispose();
         // The phone remote goes before the hook: a press already queued to this thread then finds no presser,
