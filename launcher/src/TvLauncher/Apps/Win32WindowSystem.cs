@@ -55,6 +55,29 @@ public sealed class Win32WindowSystem
         return KeyboardLine(front != IntPtr.Zero && front == ours, program, frontClass, focusClass);
     }
 
+    /// <summary>For the log: a window's program and class, whether it is visible, its place and size, and whether it is topmost.</summary>
+    public static string Describe(IntPtr hwnd, IntPtr ours)
+    {
+        if (hwnd == IntPtr.Zero)
+            return "nothing in front";
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+        string program;
+        try { program = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
+        catch (Exception) { program = "pid " + pid; }
+        var rect = NativeMethods.GetWindowRect(hwnd, out var r) ? r : (NativeMethods.RECT?)null;
+        var exStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+        return DescribeLine(hwnd == ours, program, ClassName(hwnd), NativeMethods.IsWindowVisible(hwnd),
+            rect is { } x ? (x.left, x.top, x.right - x.left, x.bottom - x.top) : null,
+            (exStyle & NativeMethods.WS_EX_TOPMOST) != 0);
+    }
+
+    internal static string DescribeLine(bool launcher, string program, string className, bool visible,
+        (int Left, int Top, int Width, int Height)? rect, bool topmost) =>
+        (launcher ? "launcher" : $"{program} {className}")
+        + (visible ? ", visible" : ", hidden")
+        + (rect is { } r ? $", {r.Width}x{r.Height} at {r.Left},{r.Top}" : ", no size")
+        + (topmost ? ", topmost" : "");
+
     internal static string KeyboardLine(bool launcherInFront, string? program, string? frontClass, string? focusClass) =>
         (launcherInFront ? "launcher in front" : program is null ? "in front: nothing" : $"in front: {program} {frontClass}")
         + $", keyboard on {focusClass ?? "(none)"}";
@@ -83,6 +106,19 @@ public sealed class Win32WindowSystem
     {
         public const int SW_RESTORE = 9;
         public const uint INPUT_MOUSE = 0;
+        public const int GWL_EXSTYLE = -20;
+        public const long WS_EX_TOPMOST = 0x00000008;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct MOUSEINPUT

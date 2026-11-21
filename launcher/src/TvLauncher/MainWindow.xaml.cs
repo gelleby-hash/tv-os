@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     private IKeyPresser? _presser;
     private DispatcherTimer? _photoTimer;
     private DispatcherTimer? _focusTimer;
+    private ForegroundProbe? _probe;
     private IReadOnlyList<string>? _photoUrls;
     private bool _pageReady;
     private bool _exiting;
@@ -97,6 +98,7 @@ public partial class MainWindow : Window
             // shell, another window kept the foreground). Show() alone never asks for the front; Home's Activate does.
             Loaded += async (_, _) =>
             {
+                WatchTheFront();
                 KeepAskingForFront();
                 await StartAsync();
                 _park?.Park();
@@ -471,6 +473,19 @@ public partial class MainWindow : Window
         await _bridge.HandleAsync(e.WebMessageAsJson);
     }
 
+    // Logs every change of the foreground window for ForegroundProbe.WatchFor after the start (what takes the front at a boot).
+    private void WatchTheFront()
+    {
+        var probe = _probe = new ForegroundProbe(new WindowInteropHelper(this).Handle, () => _sinceStart.Elapsed, Log);
+        var timer = new DispatcherTimer { Interval = ForegroundProbe.WatchFor - _sinceStart.Elapsed is var left && left > TimeSpan.FromSeconds(1) ? left : TimeSpan.FromSeconds(1) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            probe.Dispose();
+        };
+        timer.Start();
+    }
+
     // Asks for the front at the start and, while Windows refuses (during the sign-in at a boot), again every
     // FrontAtStart.AskEvery. One line in the log says how it went.
     private void KeepAskingForFront()
@@ -794,6 +809,7 @@ public partial class MainWindow : Window
         _timing.Mark("stop");
         _photoTimer?.Stop();
         _focusTimer?.Stop();
+        _probe?.Dispose();
         // The phone remote goes before the hook: a press already queued to this thread then finds no presser,
         // rather than reaching the shell with no hook (the Rii's Home is Browser Home, which opens a browser).
         _presser = null;

@@ -51,4 +51,24 @@ public sealed class Win32WindowSystemTests
     {
         Assert.Equal("in front: nothing, keyboard on (none)", Win32WindowSystem.KeyboardLine(launcherInFront: false, null, null, null));
     }
+
+    [Fact]
+    public void DescribeLine_AnotherWindow_NamesProgramClassSizeAndTopmost()
+    {
+        Assert.Equal("VolPanlu #32770, visible, 3840x2160 at 0,0, topmost",
+            Win32WindowSystem.DescribeLine(launcher: false, "VolPanlu", "#32770", visible: true, (0, 0, 3840, 2160), topmost: true));
+    }
+
+    [Fact]
+    public void DescribeLine_Launcher_HiddenAndNoSize()
+    {
+        Assert.Equal("launcher, hidden, no size",
+            Win32WindowSystem.DescribeLine(launcher: true, "TvLauncher", "HwndWrapper[TvLauncher]", visible: false, null, topmost: false));
+    }
+
+    [Fact]
+    public void Describe_NoWindow_SaysNothingInFront()
+    {
+        Assert.Equal("nothing in front", Win32WindowSystem.Describe(IntPtr.Zero, new IntPtr(0x1234)));
+    }
 }
