@@ -263,6 +263,7 @@
   function onHdrChange() {
     H.post({ type: 'hdr', on: hdrOn() });
     renderGrid();
+    if (window.TVGlass) window.TVGlass.remeasure();
     if (scope === $('home') && (!focused || !document.contains(focused))) focusEl(firstTile());
   }
 

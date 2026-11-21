@@ -84,3 +84,115 @@ test('valuesFor: the sentence sets --s-wx and the card sets --g-wx', () => {
     assert.equal(b[k] !== base[k], k === '--g-wx', 'wx changes ' + k);
   }
 });
+
+// ---------- on the home page ----------
+const { loadPage } = require('./fake-page.cjs');
+
+const SEVEN = ['--s-greet', '--s-wx', '--s-top', '--s-bottom', '--g-wx', '--g-tile', '--b-bright'];
+const glassProps = page => SEVEN.filter(n => n in page.document.documentElement.style);
+const glassLogs = page => page.posted.filter(m => m.type === 'log');
+
+// Wraps the page's createElement so a test sees the images and canvases the glass makes.
+// pixels() gives what getImageData returns; set it to a function that throws to fake a tainted canvas.
+function spy(page, pixels) {
+  const made = { img: [], canvas: [] };
+  const real = page.document.createElement;
+  page.document.createElement = tag => {
+    const e = real(tag);
+    if (tag === 'img') made.img.push(e);
+    if (tag === 'canvas') {
+      made.canvas.push(e);
+      e.getContext = () => ({ drawImage() {}, getImageData: (x, y, w, h) => pixels.fn(x, y, w, h) });
+    }
+    return e;
+  };
+  return made;
+}
+const whitePixels = () => ({ data: new Uint8ClampedArray(1920 * 1080 * 4).fill(255), width: 1920, height: 1080 });
+
+test('the page loads with no canvas and sets no glass property', () => {
+  const page = loadPage();
+  assert.deepEqual(glassProps(page), []);
+  assert.deepEqual(glassLogs(page), []);
+  assert.deepEqual(page.logs, []);
+});
+
+test('a photo that cannot be measured logs once and leaves today\'s look', () => {
+  const page = loadPage();
+  const pixels = { fn: () => { const e = new Error('tainted'); e.name = 'SecurityError'; throw e; } };
+  const made = spy(page, pixels);
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[0].onload();
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[1].onload();
+  assert.deepEqual(glassProps(page), []);
+  assert.deepEqual(glassLogs(page), [{ type: 'log', text: 'glass: could not measure a.jpg: SecurityError' }]);
+});
+
+test('the image is loaded with crossOrigin anonymous', () => {
+  const page = loadPage();
+  const made = spy(page, { fn: whitePixels });
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  assert.equal(made.img[0].crossOrigin, 'anonymous');
+  assert.equal(made.img[0].src, 'https://photos.test/a.jpg');
+});
+
+test('the first good measurement is logged once', () => {
+  const page = loadPage();
+  const made = spy(page, { fn: whitePixels });
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[0].onload();
+  page.window.TVGlass.show('https://photos.test/b.jpg');
+  made.img[1].onload();
+  const logs = glassLogs(page);
+  assert.equal(logs.length, 1);
+  assert.ok(logs[0].text.startsWith('glass: measuring works ('), logs[0].text);
+});
+
+test('a measured photo sets all seven properties, clear removes them', () => {
+  const page = loadPage();
+  const made = spy(page, { fn: whitePixels });
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[0].onload();
+  assert.deepEqual(glassProps(page), SEVEN);
+  const style = page.document.documentElement.style;
+  assert.equal(style['--g-wx'], '0.45');   // white photo: the darkest glass limit
+  assert.ok(Number.isFinite(Number(style['--s-greet'])));
+  page.window.TVGlass.clear();
+  assert.deepEqual(glassProps(page), []);
+});
+
+test('a load that is no longer the newest is ignored', () => {
+  const page = loadPage();
+  const made = spy(page, { fn: whitePixels });
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  page.window.TVGlass.show('https://photos.test/b.jpg');
+  made.img[0].onload();
+  assert.deepEqual(glassProps(page), []);
+  made.img[1].onload();
+  assert.deepEqual(glassProps(page), SEVEN);
+});
+
+test('remeasure measures the kept picture again and does nothing without one', () => {
+  const page = loadPage();
+  const made = spy(page, { fn: whitePixels });
+  page.window.TVGlass.remeasure();
+  assert.deepEqual(glassProps(page), []);
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[0].onload();
+  const style = page.document.documentElement.style;
+  SEVEN.forEach(n => style.removeProperty(n));
+  page.window.TVGlass.remeasure();
+  assert.deepEqual(glassProps(page), SEVEN);
+  assert.equal(glassLogs(page).length, 1);   // only the first good measurement is logged
+});
+
+test('every region rect is clamped to the picture, so no value is NaN', () => {
+  const page = loadPage();
+  const seen = [];
+  const made = spy(page, { fn: (x, y, w, h) => { seen.push([x, y, w, h]); return whitePixels(); } });
+  page.window.TVGlass.show('https://photos.test/a.jpg');
+  made.img[0].onload();
+  SEVEN.forEach(n => assert.ok(Number.isFinite(Number(page.document.documentElement.style[n])), n));
+  assert.deepEqual(seen, [[0, 0, 1920, 1080]]);   // the whole picture is read once
+});

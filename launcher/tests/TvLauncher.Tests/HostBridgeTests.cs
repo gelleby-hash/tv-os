@@ -325,6 +325,26 @@ public sealed class HostBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task Log_message_is_written_to_the_log()
+    {
+        await _bridge.HandleAsync("""{"type":"log","text":"glass: x"}""");
+
+        Assert.Contains(LogLines(), line => line.Split('\t')[1] == "glass: x");
+    }
+
+    [Fact]
+    public async Task Log_text_is_cut_to_200_characters_and_one_line()
+    {
+        // The JSON escape \n arrives as a real newline in the text.
+        var json = "{\"type\":\"log\",\"text\":\"" + new string('a', 100) + "\\n" + new string('b', 199) + "\"}";
+        await _bridge.HandleAsync(json);
+
+        var line = Assert.Single(LogLines(), l => l.Contains("aaaa")).Split('\t')[1];
+        Assert.Equal(200, line.Length);
+        Assert.Equal(' ', line[100]);
+    }
+
+    [Fact]
     public async Task Pointer_IsLogged()
     {
         await _bridge.HandleAsync("""{"type":"pointer"}""");

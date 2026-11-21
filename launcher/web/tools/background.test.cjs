@@ -266,3 +266,15 @@ test('main.js renders the sky through TVBackground, not TVLandscape directly', (
   assert.match(main, /TVBackground\.update\(\$\('landscape'\)/);
   assert.ok(!/TVLandscape\.render/.test(main));
 });
+
+test('showing a photo asks the glass to measure it, falling back clears it', () => {
+  const calls = [];
+  const s = setup();
+  s.window.TVGlass = { show: u => calls.push('show ' + u), clear: () => calls.push('clear') };
+  s.bg.setPhotos(URLS);
+  s.bg.update(s.element, STATE);
+  s.load(0);
+  assert.deepEqual(calls, ['show ' + URLS[0]]);
+  s.bg.setPhotos([]);
+  assert.deepEqual(calls, ['show ' + URLS[0], 'clear']);
+});

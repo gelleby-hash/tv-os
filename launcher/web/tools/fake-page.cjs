@@ -31,7 +31,7 @@ class El {
     this.attrs = {};
     this.hidden = false;
     // setProperty for CSS custom properties, as the page sets --motion on the root element.
-    this.style = { setProperty(name, value) { this[name] = String(value); } };
+    this.style = { setProperty(name, value) { this[name] = String(value); }, removeProperty(name) { delete this[name]; } };
     this.children = [];
     this.parentNode = null;
     this._text = '';

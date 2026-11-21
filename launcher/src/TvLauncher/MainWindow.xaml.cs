@@ -204,8 +204,9 @@ public partial class MainWindow : Window
             PageSettings.For(_dev).ApplyTo(core.Settings);
             core.SetVirtualHostNameToFolderMapping(HomeHost, Path.Combine(AppContext.BaseDirectory, "web"), CoreWebView2HostResourceAccessKind.Deny);
             Directory.CreateDirectory(PhotosFolder);
-            // DenyCors: the home page may show the photos as images, nothing else may read them.
-            core.SetVirtualHostNameToFolderMapping(PhotosHost, PhotosFolder, CoreWebView2HostResourceAccessKind.DenyCors);
+            // Allow: the home page reads the photos' pixels to shade the glass by how bright each photo is, which needs
+            // CORS access. Only the home view has this mapping (the apps run in their own environments).
+            core.SetVirtualHostNameToFolderMapping(PhotosHost, PhotosFolder, CoreWebView2HostResourceAccessKind.Allow);
 
             // The home page is the only page this window ever shows.
             core.NewWindowRequested += (_, e) => e.Handled = true;

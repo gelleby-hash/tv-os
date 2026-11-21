@@ -44,7 +44,7 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
     {
         if (Parse(json) is not { } message)
             return;
-        var (type, id, on, place, to, version, code) = message;
+        var (type, id, on, place, to, version, code, text) = message;
 
         try
         {
@@ -116,6 +116,11 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
                 case "pointer":
                     timing.Mark("page pointer");
                     break;
+                // A note from the page for the log, kept to one short line.
+                case "log" when text is not null:
+                    var line = text.ReplaceLineEndings(" ");
+                    timing.Mark(line.Length > 200 ? line[..200] : line);
+                    break;
             }
         }
         catch (Exception ex)
@@ -124,7 +129,7 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
         }
     }
 
-    private static (string Type, string? Id, bool? On, Coordinates? Place, int? To, string? Version, int? Code)? Parse(string json)
+    private static (string Type, string? Id, bool? On, Coordinates? Place, int? To, string? Version, int? Code, string? Text)? Parse(string json)
     {
         try
         {
@@ -133,7 +138,7 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
             if (root.ValueKind != JsonValueKind.Object)
                 return null;
             var type = Text(root, "type");
-            return type is null ? null : (type, Text(root, "id"), Flag(root, "on"), Place(root), Whole(root, "to"), Text(root, "version"), Whole(root, "code"));
+            return type is null ? null : (type, Text(root, "id"), Flag(root, "on"), Place(root), Whole(root, "to"), Text(root, "version"), Whole(root, "code"), Text(root, "text"));
         }
         catch (JsonException)
         {
