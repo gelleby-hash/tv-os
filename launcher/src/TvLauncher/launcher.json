@@ -57,6 +57,9 @@
       "Id": "netflix",
       "Name": "Netflix",
       "Url": "https://www.netflix.com",
+      "BrowserArgs": "--autoplay-policy=no-user-gesture-required",
+      "ArrowNav": true,
+      "BoostGain": 4,
       "Icon": "icons/netflix.svg"
     },
     {

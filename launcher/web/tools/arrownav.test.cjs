@@ -1132,3 +1132,134 @@ test('player: the picked button carries the mark, which moves with it and goes w
   assert.equal(p.document.activeElement, p.layer);
   assert.ok(!p.fwd10.hasAttribute('data-tv-pick'));
 });
+
+// Netflix's home page as measured on 2026-11-21 (1920 x 1080, signed in): rows of cards (links, 250 wide every 256)
+// moved by a transform inside a box that clips them (overflow clip), with "See previous titles" and "See more titles"
+// buttons at opacity 0 at the box's edges, drawn only for a mouse. With nothing before the first card the left button
+// measures nothing. A click on "See more titles" slides the row seven cards, so the card cut by the right edge becomes
+// the first. OK on a card opens its detail panel, a dialog marked aria-modal, with Play first in it and the close
+// button above it to the right, while the focus stays on the card behind. A privacy dialog, also aria-modal, is in the
+// page all along and measures nothing. The player has its own page, /watch/<id>, whose video fills the screen in layers
+// that are not fixed; Netflix focuses its player element and takes the arrows itself (Left and Right seek 10 s).
+function netflixPage({ pathname = '/browse' } = {}) {
+  const body = new El('body');
+  const doc = { body, documentElement: new El('html'), activeElement: body, fullscreenElement: null, querySelectorAll: (s) => body.querySelectorAll(s),
+    elementFromPoint: () => body };
+  doc.documentElement.add(body);
+  const bar = new El('div', {}, [0, 0, 1920, 80], { position: 'fixed' });
+  bar.add(new El('a', { href: '/browse', 'aria-label': 'Home' }, [160, 20, 76, 40]));
+  const names = ['Young Sheldon', 'Avatar', 'Raw', 'War Machine', 'Wednesday', 'ONE PIECE', 'One Piece', 'Stranger Things',
+    'The Middle', 'Black Clover', 'Stargate', 'Jujutsu Kaisen', '2 Broke Girls'];
+  const scroller = new El('section', { 'data-uia': 'carousel-scroller' }, [0, 470, 1920, 141], { overflowX: 'clip', overflowY: 'clip' });
+  const track = new El('div', {}, [0, 470, 1920, 141], { overflowX: 'clip', overflowY: 'clip' });
+  const cards = names.map((n, i) => new El('a', { href: '/title/' + i, 'data-uia': 'standard-card', 'aria-label': n }, [60 + i * 256, 470, 250, 141]));
+  track.add(...cards);
+  const prev = new El('button', { 'aria-label': 'See previous titles', tabindex: -1 }, [0, 0, 0, 0], { opacity: '0' });
+  const more = new El('button', { 'aria-label': 'See more titles' }, [1831, 512, 28, 56], { opacity: '0' });
+  const shift = (by) => {
+    for (const c of cards) c.rect = [c.rect[0] + by, c.rect[1], c.rect[2], c.rect[3]];
+    prev.rect = cards[0].rect[0] < 0 ? [46, 512, 28, 56] : [0, 0, 0, 0];
+  };
+  more.click = function () { this.clicks = (this.clicks || 0) + 1; shift(-7 * 256); };
+  prev.click = function () { this.clicks = (this.clicks || 0) + 1; shift(7 * 256); };
+  scroller.add(track, prev, more);
+  const below = new El('a', { href: '/title/below', 'data-uia': 'standard-card', 'aria-label': 'Below' }, [60, 692, 250, 141]);
+  // The privacy dialog, there all along: marked aria-modal, measuring nothing.
+  const privacy = new El('div', { role: 'dialog', 'aria-modal': 'true' }, [0, 0, 0, 0]);
+  privacy.add(new El('button', { 'aria-label': 'Close preference center' }, [0, 0, 0, 0]));
+  body.add(bar, scroller, below, privacy);
+  // The detail panel, added when OK opens it.
+  const panel = new El('div', { role: 'dialog', 'aria-modal': 'true', tabindex: -1 }, [431, 32, 1058, 1900]);
+  const play = new El('button', { 'data-uia': 'play-button', 'aria-label': 'Play' }, [483, 519, 92, 40]);
+  const myList = new El('button', { 'aria-label': 'Add to My List' }, [585, 519, 40, 40]);
+  const close = new El('button', { 'aria-label': 'Close' }, [1430, 46, 48, 48]);
+  const episode = new El('a', { href: '/watch/1', 'aria-label': 'Episode 1' }, [479, 943, 962, 130]);
+  panel.add(play, myList, close, episode);
+  // The player page: Netflix's player element, focused, over a video filling the screen; nothing in it is fixed.
+  const player = new El('div', { 'data-uia': 'player', tabindex: 0, 'aria-label': 'Player' }, [0, 0, 1920, 1080], { position: 'absolute' });
+  const video = new El('video', {}, [0, -3, 1920, 1087], { position: 'absolute' });
+  if (pathname.startsWith('/watch/')) { body.children.length = 0; body.add(player.add(video)); }
+  const p = run(doc, pathname, { cards, prev, more, below, panel, play, myList, close, episode, player, video });
+  p.openPanel = () => body.add(panel);
+  return p;
+}
+
+test('netflix: the player page (/watch/) keeps every key, as a player page of its own', () => {
+  const p = netflixPage({ pathname: '/watch/80018499' });
+  p.player.focus();
+  for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Enter']) {
+    const ev = press(p, key);
+    assert.equal(ev.prevented || ev.stopped, false, key + ' goes on to Netflix, which seeks or changes the volume');
+    assert.equal(focused(p), 'Player', key + ': the focus stays on the player');
+  }
+});
+
+test('netflix: a page whose address only has "watch" in it is not the player', () => {
+  const p = netflixPage({ pathname: '/browse/my-list/watchlist' });
+  p.cards[0].focus();
+  assert.ok(press(p, 'ArrowRight').prevented);
+  assert.equal(focused(p), 'Avatar');
+});
+
+test('netflix: with the detail panel open and the focus behind it, the next press starts on the panel\'s first item, Play', () => {
+  const p = netflixPage();
+  p.cards[6].focus();
+  p.openPanel();
+  const ev = press(p, 'ArrowDown');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(focused(p), 'Play', 'the first item in the panel, not the close button higher up');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Add to My List', 'then the arrows move inside the panel');
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Episode 1');
+});
+
+test('netflix: a dialog marked aria-modal that measures nothing (a hidden privacy dialog) does not take the arrows', () => {
+  const p = netflixPage();
+  p.cards[0].focus();
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Avatar');
+});
+
+test('netflix: Right onto the card cut by the row\'s edge presses the row\'s own "See more titles", which slides it in', () => {
+  const p = netflixPage();
+  p.cards[6].focus();   // the 7th, the last card wholly in sight
+  const ev = press(p, 'ArrowRight');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(focused(p), 'Stranger Things');
+  assert.equal(p.more.clicks, 1, 'the row slid');
+  assert.equal(p.cards[7].rect[0], 60, 'the cut card is now the first');
+  assert.equal(JSON.stringify(p.cards[7].focusOpts), JSON.stringify({ preventScroll: true }));
+  assert.equal(p.cards[7].scrolled, null, 'no scrollIntoView, which would scroll the clipping box behind the row\'s back');
+});
+
+test('netflix: after a slide, Right moves on along the cards in sight without pressing again; Left past the first slides back', () => {
+  const p = netflixPage();
+  p.cards[6].focus();
+  press(p, 'ArrowRight');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'The Middle');
+  assert.equal(p.more.clicks, 1);
+  press(p, 'ArrowLeft');
+  assert.equal(focused(p), 'Stranger Things');
+  press(p, 'ArrowLeft');
+  assert.equal(focused(p), 'One Piece', 'the card before, out of sight to the left');
+  assert.equal(p.prev.clicks, 1, '"See previous titles" slid it back');
+  assert.equal(p.cards[6].rect[0], 1596);
+});
+
+test('netflix: Left from the first card, with nothing before it, stays put and presses nothing', () => {
+  const p = netflixPage();
+  p.cards[0].focus();
+  press(p, 'ArrowLeft');
+  assert.equal(focused(p), 'Young Sheldon');
+  assert.equal(p.prev.clicks, undefined);
+});
+
+test('netflix: Down never jumps to a card out of sight, and presses no row button', () => {
+  const p = netflixPage();
+  p.cards[0].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Below');
+  assert.equal(p.more.clicks, undefined);
+});

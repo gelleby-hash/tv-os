@@ -236,7 +236,7 @@ public sealed class LauncherConfigTests : IDisposable
         Assert.Equal("channel4", c4.GetProperty("id").GetString());
         Assert.Equal("tv", c4.GetProperty("version").GetString());
         Assert.Equal(["tv", "web"], c4.GetProperty("versions").EnumerateArray().Select(v => v.GetProperty("id").GetString()));
-        Assert.Equal(["Disney+", "Prime Video"], page.GetProperty("boostApps").EnumerateArray().Select(b => b.GetString()));
+        Assert.Equal(["Disney+", "Netflix", "Prime Video"], page.GetProperty("boostApps").EnumerateArray().Select(b => b.GetString()));
         Assert.False(page.TryGetProperty("homeApps", out _));
         Assert.False(page.TryGetProperty("favoriteOrder", out _));
         Assert.False(page.GetProperty("defaults").TryGetProperty("hidden", out _));
@@ -887,7 +887,7 @@ public sealed class LauncherConfigTests : IDisposable
     {
         var root = ParsedScriptConfig(PageScript(LauncherConfig.Load(RepoConfigPath)));
 
-        Assert.Equal(["Disney+", "Prime Video"], root.GetProperty("boostApps").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["Disney+", "Netflix", "Prime Video"], root.GetProperty("boostApps").EnumerateArray().Select(e => e.GetString()));
     }
 
     [Fact]

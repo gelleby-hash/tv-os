@@ -751,8 +751,10 @@
 
   // The host's boost state: on startup and after each press. The button shows it: its icon, a light while on, and its
   // label under it while in focus. After a press (not the starting state) the label springs in again (pop).
+  // Three or more read as a list: "Disney+, Netflix and Prime Video" (Netflix joined Disney+ and Prime, 2026-11-21).
   function boostLabel(on) {
-    return tr(on === undefined ? 'Boost {apps}' : on ? 'Boost {apps}: on' : 'Boost {apps}: off', { apps: boostApps.join(tr(' and ')) });
+    var apps = boostApps.length > 2 ? boostApps.slice(0, -1).join(', ') + tr(' and ') + boostApps[boostApps.length - 1] : boostApps.join(tr(' and '));
+    return tr(on === undefined ? 'Boost {apps}' : on ? 'Boost {apps}: on' : 'Boost {apps}: off', { apps: apps });
   }
   function drawBoost(btn, on, pop) {
     btn.innerHTML = I.ui[btn.dataset.icon] + '<span class="led"></span>' +

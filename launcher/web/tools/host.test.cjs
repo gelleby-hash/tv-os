@@ -278,6 +278,14 @@ test('boost label joins several app names with and', async () => {
   assert.equal(button(page, 'boost').getAttribute('aria-label'), 'Boost Disney+ and Netflix: on');
 });
 
+test('boost label lists three or more app names with commas and a last and', async () => {
+  const config = fakeConfig();
+  config.boostApps = ['Disney+', 'Netflix', 'Prime Video'];
+  const page = await ready({ config });
+  page.deliver({ type: 'boost', on: true });
+  assert.equal(button(page, 'boost').getAttribute('aria-label'), 'Boost Disney+, Netflix and Prime Video: on');
+});
+
 test('boost button hidden without boostApps', async () => {
   for (const boostApps of [[], undefined]) {
     const config = fakeConfig();

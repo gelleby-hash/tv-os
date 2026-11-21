@@ -261,16 +261,50 @@ internal static class PageScripts
           // The Swiper carousel a tile is in (Channel 4's rows). It clips its tiles and moves them with a transform, not
           // by scrolling, so a tile past its edge is clipped, and focus alone leaves it out of sight (measured 2026-11-02).
           const carousel = (e) => { const c = e.closest('.swiper'); return c && c.swiper && typeof c.swiper.slideTo === 'function' ? c : null; };
+          // A row that clips its tiles and slides them with a button of its own at each end, drawn only for a mouse:
+          // Netflix's "See previous titles" and "See more titles" (2026-11-21). Focus alone leaves a tile past the edge
+          // out of sight there (measured), and a click on the button slides the row a page. For a tile the row cuts
+          // or hides on the side pressed (dir 1 right, -1 left), the button: one inside a box that clips the tile on
+          // that side, level with the tile, at that end of the box, and measuring something (Netflix's left one
+          // measures nothing while no tile lies before the first). Null when there is none. A scroll arrow tied to a
+          // region (aria-controls, Disney+'s) is not one: Disney+'s banner keeps its hidden slides out of reach.
+          const pager = (e, dir) => {
+            const r = face(e).getBoundingClientRect();
+            for (let p = e.parentElement, n = 0; p && p !== document.body && n < 8; p = p.parentElement, n++) {
+              if (!/hidden|clip/.test(getComputedStyle(p).overflowX)) continue;
+              const q = p.getBoundingClientRect();
+              if (dir > 0 ? r.right <= q.right + 1 : r.left >= q.left - 1) continue;
+              for (const b of p.querySelectorAll('button')) {
+                if (b.tagName !== 'BUTTON' || b.disabled || b.contains(e) || scrollArrow(b)) continue;
+                const k = b.getBoundingClientRect();
+                if (k.width < 4 || k.height < 4 || k.bottom <= r.top || k.top >= r.bottom) continue;
+                if (dir > 0 ? k.right >= q.right - 150 && k.left > q.left + q.width / 2 : k.left <= q.left + 150 && k.right < q.left + q.width / 2) return b;
+              }
+            }
+            return null;
+          };
+          // A dialog the page marks modal and shows: the last one wins. Netflix's detail panel is one, and OK on a card
+          // opens it with the focus left on the card behind, so the arrows moved between the cards under it
+          // (2026-11-21). One that measures nothing is not open: Netflix keeps a privacy dialog in the page all along.
+          const openModal = () => {
+            const all = document.querySelectorAll('[aria-modal="true"]');
+            for (let i = all.length - 1; i >= 0; i--) {
+              const m = all[i], r = m.getBoundingClientRect(), s = getComputedStyle(m);
+              if (r.width >= 4 && r.height >= 4 && s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0') return m;
+            }
+            return null;
+          };
           // In a bar fixed to the screen (the top menu): always on screen, so it would always look near.
           const pinned = (e) => { for (let p = e; p; p = p.parentElement) { const s = getComputedStyle(p).position; if (s === 'fixed' || s === 'sticky') return true; } return false; };
           const onScreen = (r) => r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight;
           const typing = (e) => e && (e.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName));
 
           // The best candidate: the closest one in sight, from the page before the top menu (unless already in it).
-          // Along a row, a carousel's tile past its edge counts too: the carousel is told to show it.
+          // Along a row (along: 1 right, -1 left), a tile past a carousel's edge counts too, and one past the edge of a
+          // row with a button on that side: the carousel is told to show it, or the button is pressed.
           const rank = (found, fromBar, along) => {
             found.sort((a, b) => a.score - b.score);
-            const shown = found.filter(f => !clipped(face(f.e)) || (along && carousel(f.e)));
+            const shown = found.filter(f => !clipped(face(f.e)) || (along && (carousel(f.e) || pager(f.e, along))));
             return (shown.find(f => fromBar || !pinned(f.e)) || shown[0] || {}).e;
           };
 
@@ -314,7 +348,7 @@ internal static class PageScripts
               const size = d[0] !== 0 ? c.width : c.height;
               found.push({ e, ahead: Math.max(ahead, 0), score: Math.max(ahead, 0) + off * 2 + centres / 10 + (1 - share) * size });
             }
-            const to = rank(found, fromBar, d[0] !== 0);
+            const to = rank(found, fromBar, d[0]);
             // Up and Down never pass a row of tabs, which switches what is shown under it: they stop on its selected
             // tab, as on a TV. From Prime Video's episodes, Up went to whichever of Episodes, Related and Details lay
             // nearest, or over them to the wide synopsis above (2026-11-15).
@@ -328,10 +362,13 @@ internal static class PageScripts
             return to;
           };
 
-          // Nothing focused yet (a page just opened): start at the top left of the page, not in the top menu.
-          const first = () => {
+          // Nothing focused yet (a page just opened): start at the top left of the page, not in the top menu. In a
+          // dialog, on its first item, as a browser focuses a dialog it opens: Netflix's panel has Play first and its
+          // close button higher up, to the right.
+          const first = (root) => {
             const found = [];
-            for (const { e, r } of items(document)) if (onScreen(r)) found.push({ e, score: r.top + r.left / 4 });
+            let i = 0;
+            for (const { e, r } of items(root || document)) if (onScreen(r)) found.push({ e, score: root ? i++ : r.top + r.left / 4 });
             return rank(found, false);
           };
 
@@ -527,7 +564,9 @@ internal static class PageScripts
 
           window.addEventListener('keydown', (ev) => {
             const layer = playerLayer();
-            if (location.pathname.includes('/play/') || document.fullscreenElement || layer) {
+            // A player page of its own: Disney+'s /play/, Netflix's /watch/ (Netflix seeks on Left and Right and sets
+            // its volume on Up and Down itself; its video is in layers that are not fixed, 2026-11-21).
+            if (/\/(play|watch)\//.test(location.pathname) || document.fullscreenElement || layer) {
               try { keysMode(false); } catch (e) { console.warn('tv pointer', e); }
               nudge();
               try { if (layer) wake(); } catch (e) { console.warn('tv player wake', e); }
@@ -566,8 +605,10 @@ internal static class PageScripts
               const c = nothing ? null : face(cur).getBoundingClientRect();
               const away = c && (c.top > innerHeight * 1.5 || c.bottom < -innerHeight / 2)
                 && !(placed && placed.e === cur && Math.abs(c.top + scrollY - placed.y) < innerHeight / 2);
-              const start = nothing || away;
-              const to = start ? first() : next(cur, d);
+              // A modal dialog open with the focus outside it: start in the dialog.
+              const modal = openModal(), outside = modal && !(cur && modal.contains(cur));
+              const start = nothing || away || outside;
+              const to = start ? first(outside ? modal : null) : next(cur, d);
               // Nothing within a screen up or down: the page moves on a little, so it can show more.
               if (!to && !start && d[1] !== 0) window.scrollBy({ top: d[1] * Math.round(innerHeight / 3), behavior: quick ? 'instant' : 'smooth' });
               if (!to) return;
@@ -577,10 +618,13 @@ internal static class PageScripts
               const box = carousel(to), r = face(to).getBoundingClientRect(), q = box && box.getBoundingClientRect();
               const cut = box && (r.left < q.left - 1 || r.right > q.right + 1);
               const slide = cut ? Array.prototype.indexOf.call(box.swiper.slides, to.closest('.swiper-slide')) : -1;
+              // A tile past the edge of a row with its own button on that side: the button slides the row.
+              const rowButton = !box && !start && d[0] !== 0 ? pager(to, d[0]) : null;
               to.focus({ preventScroll: true });
               placed = { e: to, y: r.top + scrollY };
               // A smooth scroll lags behind quick presses and a held key, so those scroll at once.
               if (slide >= 0) box.swiper.slideTo(slide);
+              else if (rowButton) rowButton.click();
               else face(to).scrollIntoView({ block: 'center', inline: 'nearest', behavior: quick ? 'instant' : 'smooth' });
             } catch (e) { console.warn('tv arrows', e); }
           }, true);
