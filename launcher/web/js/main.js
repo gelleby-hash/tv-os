@@ -760,6 +760,32 @@
       '<span class="btn-tip' + (pop ? ' pop' : '') + '">' + esc(boostLabel(on)) + '</span>';
     btn.setAttribute('aria-label', boostLabel(on));
   }
+  // The host's view of the connection: 'internet', 'local' (a network but no internet) or 'none'. The chip shows only
+  // when it has been wrong for 10 s and the page has been up for 60 s, so a start-up or a blip never flashes it.
+  // Timers, not the clock, so the page's own timing is the only thing that counts.
+  var netState = null, netWrongLong = false, netSettled = false, netTimer = 0;
+  function drawNetChip() {
+    var chip = document.getElementById('netChip');
+    var show = netSettled && netWrongLong && netState !== null && netState !== 'internet';
+    chip.hidden = !show;
+    if (show) document.getElementById('netChipText').textContent = netState === 'none' ? 'No network' : 'No internet';
+  }
+  setTimeout(function () { netSettled = true; drawNetChip(); }, 60e3);
+  window.TVNet = { state: function () { return netState; } };
+  H.on('net', function (msg) {
+    var state = msg.state;
+    if (state === netState) return;
+    var wasWrong = netState !== null && netState !== 'internet';
+    netState = state;
+    // From one wrong state to another the stretch goes on, so the chip stays and only its words change.
+    if (!(wasWrong && state !== 'internet')) {
+      clearTimeout(netTimer);
+      netWrongLong = false;
+      if (state !== 'internet') netTimer = setTimeout(function () { netWrongLong = true; drawNetChip(); }, 10e3);
+    }
+    drawNetChip();
+  });
+
   H.on('boost', function (msg) {
     var on = boostOn = !!msg.on, btn = document.querySelector('[data-action="boost"]');
     btn.classList.toggle('on', on);
