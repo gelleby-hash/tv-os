@@ -9,15 +9,16 @@ The project started because the TV's own apps were slow to open and slow to resp
 ## What it does
 
 - **A home screen** in the style of [custom-tv](https://github.com/berteotti/custom-tv): the date, a greeting, the weather, rotating Windows Spotlight photos, and one tile per app.
-- **The apps inside the launcher's own window.** Each runs in its own WebView2 view, with its own sign-in. YouTube shows its TV interface; Disney+, Channel 4's website, Prime Video and Plex are websites in which the launcher moves focus on the remote's arrows, one item at a time. Netflix, Prime Video and Plex are in the configuration but only lightly tested.
-- **Per-app fixes in the configuration,** for example hiding a page element the remote cannot reach (Prime Video's cookie notice).
+- **The apps inside the launcher's own window.** Each runs in its own WebView2 view, with its own sign-in. YouTube shows its TV interface; Disney+, Channel 4's website, Prime Video and Plex are websites in which the launcher moves focus on the remote's arrows, one item at a time. Netflix and Prime Video are newer and not yet checked at the TV; Plex is only lightly tested.
+- **Per-app fixes in the configuration,** for example hiding a page element the remote cannot reach (Prime Video's cookie notice), or pressing a player's own Next Episode button for the remote's next key.
 - **The remote's Home button always returns home.** Leaving an app pauses it through the app's own player, and coming back finds it paused where it was.
-- **Back** walks back through Disney+'s pages and then goes home; inside YouTube it stays in YouTube.
+- **Back** walks back through Disney+'s pages and then goes home; inside YouTube it stays in YouTube; in Prime Video it closes the player and lands on the title's Resume button.
+- **The remote's menu key** opens the menu of the item in focus, such as Prime Video's hover card, and closes it again.
 - **An Apps screen** (the first button in the top row) to put the home row in the order you like, hide an app, or choose between an app's versions (Channel 4 comes as a TV app and as its website, each with its own sign-in). The choices are kept in `%LOCALAPPDATA%\TvLauncher\state.json`.
-- **A Disney+ volume boost** toggled from the home screen, because Disney+ plays much quieter than YouTube.
+- **A volume boost** toggled from the home screen, for the apps that play much quieter than YouTube (Disney+, Netflix and Prime Video).
 - **A glass weather card** (Open-Meteo, no API key, no place name), with a moon drawn by its real phase, and a forecast screen with UV, wind, sun, rainfall, visibility and humidity. The place is picked on screen with the remote, or comes from Windows location.
 - **A phone remote:** an Android app with the same keys as the physical remote, and a microphone for YouTube's voice search.
-- **Windows stays out of sight:** the app tiles wait until Windows HDR is on, the remote's Search and menu keys are swallowed, and restart and shut down ask first.
+- **Windows stays out of sight:** the app tiles wait until Windows HDR is on, the remote's Search and menu keys never reach Windows while the launcher is in front, and restart and shut down ask first.
 
 ## How it works
 
@@ -29,26 +30,28 @@ To pause an app, the launcher reads whether its video is playing and, if so, pre
 
 ### The physical remote
 
-The family's remote is a Rii i25: a 2.4 GHz radio remote with a USB dongle, so it needs no line of sight and Windows sees it as a keyboard. It is used with its air mouse off; with the air mouse on, OK becomes a mouse click and Back a right click.
+The family's remote is a Rii i25: a 2.4 GHz radio remote with a USB dongle, so it needs no line of sight and Windows sees it as a keyboard. It is meant to be used with its air mouse off; with the air mouse on, OK becomes a mouse click and Back a right click. Because the air mouse can come back on by itself, the launcher can hold the pointer on a small spot in the screen's corner while the air mouse moves and treat its clicks as OK and Back (`ParkPointer` with `AirMouseDevice`).
 
 | Button | What the PC receives | What the launcher does |
 |---|---|---|
 | D-pad, OK | The arrow keys, Enter | Moves focus and picks, on the home screen and in the apps |
 | Home | Browser Home (virtual-key 172) | Pauses the app in front and returns to the home screen, from anywhere |
-| Back | Browser Back (166) | Closes an overlay on the home screen; walks back through Disney+'s pages, then goes home; stays inside YouTube |
+| Back | Browser Back (166) | Closes an overlay on the home screen; walks back through Disney+'s pages, then goes home; stays inside YouTube; closes Prime Video's player |
+| The 3-lines key | The menu key (93) | In an app, opens and closes the menu of the item in focus (Prime Video's hover card); kept from Windows on the home screen |
+| Search | Browser Search (170) | Frees the held pointer when a page needs it, and holds it again on the next press or Home; kept from Windows, so its Start menu never opens |
+| Forward, backward | Next and previous track (176, 177) | Left to the app in front: the next and previous video in YouTube; next presses Next Episode in Prime Video |
 | Volume, mute, play/pause | The media keys | Left to Windows and the app in front |
-| Search, the menu key | Browser Search (170), the menu key (93) | Swallowed while the launcher is in front, so Windows' Start menu never opens |
 | Power, Source | Nothing | They are the remote's IR-learnable keys, for the TV and the sound bar |
 
-Windows marks Home, Back and the media keys as injected input; the launcher's low-level hook acts on them anyway. The codes are settings (`HomeKeyVk`, `BackKeyVk`, `SwallowKeyVks`), so another remote can be used by changing `launcher.json`. To find a remote's codes, start the launcher with `--keytest`.
+Windows marks Home, Back and the media keys as injected input; the launcher's low-level hook acts on them anyway. The codes are settings (`HomeKeyVk`, `BackKeyVk`, `MenuKeyVk`, `PointerKeyVk`, `SwallowKeyVks`), so another remote can be used by changing `launcher.json`. To find a remote's codes, start the launcher with `--keytest`.
 
 ### The phone remote
 
 `remote/android` is an Android app (Kotlin and Jetpack Compose, Android 8.0 or later) that turns a phone into a remote for the launcher. There is no iPhone app.
 
-<img src="images/phone-remote.webp" width="280" alt="The phone remote: the status line &quot;TV connected&quot; at the top, the microphone button, a round D-pad with OK in the middle, Back, Home and play/pause below it, and a volume bar at the bottom">
+<img src="images/phone-remote.webp" width="280" alt="The phone remote: the status line &quot;TV connected&quot; at the top, the microphone button, a round D-pad with OK in the middle, a row of Back, Home, menu and mute below it, then previous, play/pause and next, and a volume bar at the bottom">
 
-- **Its keys are the physical remote's, nothing more:** the D-pad and OK, Back, Home, play/pause, and volume down and up. Holding an arrow or a volume key repeats it, after 400 ms and then every 120 ms. The phone gives a short buzz for each press that reached the launcher, and none for one that did not.
+- **Its keys are the physical remote's, nothing more:** the D-pad and OK, Back, Home, the menu key, mute, previous, play/pause, next, and volume down and up. Holding an arrow or a volume key repeats it, after 400 ms and then every 120 ms. The phone gives a short buzz for each press that reached the launcher, and none for one that did not.
 - **The microphone** sends the phone's sound to YouTube's own voice search while YouTube is in front (an app with `"PhoneMic": true`). One phone listens at a time, for at most 15 seconds; the launcher logs each session but never the sound. With any other app in front, the button is greyed out.
 - **Choosing the PC:** a long press on the status line at the top (it reads, for example, "TV connected") opens "Connect to", with the known launchers by name, or an address and port to type. The known launchers come from `remote/android/launchers.properties`: copy `launchers.example.properties` to that name (git ignores it), put in your own launchers' names and addresses, and build. The first is the one the app uses until another is picked. The build also allows unencrypted traffic to those hosts only (and to `127.0.0.1` for testing over USB), so the app cannot reach a launcher missing from the file.
 
@@ -137,10 +140,15 @@ All settings are in `launcher.json`, except the order, visibility and version of
 
 | Setting | Meaning |
 |---|---|
-| `Apps` | One entry per tile: `Id`, `Name`, `Url`, `Icon`, and optionally `UserAgent`, `BrowserArgs`, `BoostGain`, `Back` (`History` or `Page`), `DirectPauseFallback`, `ArrowNav` (the launcher moves focus on the arrow keys, for a site built for a mouse, and slides Swiper carousels at their edge), `HidePlayReady` (the page is told PlayReady is missing, so it uses Widevine), `PauseButton` (the label of the player's pause button, pressed instead of Space), `HideElements` (a CSS selector: what it matches is never shown, for an element the remote cannot reach), `ExitWhenEmpty` (the id of the page's root element: once the app has emptied it, the launcher goes home) and `PhoneMic` (the phone remote's microphone works in this app). An entry can instead carry a `Versions` list of full entries, the first being the default; each version has its own sign-in, and adding a second version to an app that already has one moves its profile and signs it out. Adding a web app is a configuration change. |
+| `Apps` | One entry per tile: `Id`, `Name`, `Url`, `Icon`, and optionally `UserAgent`, `BrowserArgs`, `BoostGain`, `Back` (`History` or `Page`), `DirectPauseFallback`, `ArrowNav` (the launcher moves focus on the arrow keys, for a site built for a mouse, and slides Swiper carousels at their edge), `HidePlayReady` (the page is told PlayReady is missing, so it uses Widevine), `PauseButton` (the label of the player's pause button, pressed instead of Space), `HideElements` (a CSS selector: what it matches is never shown, for an element the remote cannot reach), `ExitWhenEmpty` (the id of the page's root element: once the app has emptied it, the launcher goes home), `NextButton` (the label of the player's next-episode button, pressed for the remote's next key; without it the key reaches the page), `PlayerEscape` (Back in a player laid over the page presses Escape, which closes it, instead of going back in history), `FocusAfterPlayer` (a CSS selector, with `ArrowNav`: the button that takes the focus once the player closes) and `PhoneMic` (the phone remote's microphone works in this app). An entry can instead carry a `Versions` list of full entries, the first being the default; each version has its own sign-in, and adding a second version to an app that already has one moves its profile and signs it out. Adding a web app is a configuration change. |
 | `HomeKeyVk` | The Home key's virtual-key code, or a list of codes (for example `[172, 123]` for a remote's Browser Home and the keyboard's F12) |
 | `BackKeyVk` | The Back key's virtual-key code (166, Browser Back) |
+| `MenuKeyVk` | The menu key's virtual-key code (93 by default), which opens the menu of the item in focus in an app |
 | `SwallowKeyVks` | Keys kept from Windows while the launcher is in front (170 Browser Search, 93 the menu key) |
+| `ParkPointer` | When true, the launcher keeps the mouse pointer on a small spot of its own in the screen's corner, at the start and at each switch. Off by default, since it moves the pointer of a PC used with a mouse |
+| `AirMouseDevice` | Part of the raw input name of the remote's dongle (the Rii i25's is `VID_1997&PID_2433`), with `ParkPointer`: its air mouse is held on the spot and its clicks count as OK and Back |
+| `PointerKeyVk` | The key that frees the held pointer and holds it again (170 by default, the Rii's Search) |
+| `FrontAtStart` | On by default: after it starts, the launcher keeps asking for the front until it has held it, for a boot where Windows refuses the first request. Set it to false on a PC someone works at, so the launcher asks once |
 | `RequireHdr` | When true, the app tiles wait until Windows HDR is on |
 | `Location` | The weather's place, optional (the repository's `launcher.json` has none). A choice made on screen (a place, Windows location, or no weather) wins over it, and it wins over Windows location |
 | `Unit`, `Clock` | The display formats |
@@ -164,7 +172,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File setup/deploy-launcher.ps1
 
 ## Status
 
-The launcher is deployed on the mini PC and in family use with YouTube, Disney+ and Channel 4. Netflix, Prime Video and Plex are in the configuration and need more testing with accounts.
+The launcher is deployed on the mini PC and in family use with YouTube, Disney+ and Channel 4. Netflix and Prime Video have been tested signed in on a development PC but not yet at the TV; Plex needs more testing.
 
 ## Credits
 
