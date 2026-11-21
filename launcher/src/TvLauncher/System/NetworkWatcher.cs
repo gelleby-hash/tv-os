@@ -100,23 +100,27 @@ public sealed class NetworkWatcher : IDisposable
     /// <summary>Posts the state as it is now; the page asks for it when it has loaded.</summary>
     public void PostCurrent()
     {
-        var state = _source.Read();
+        // Reading and posting under one lock keeps the posts in the order of the reads: Windows raises changes in
+        // bursts on several threads, and a slower earlier read must not post after a newer one.
         lock (_gate)
+        {
+            var state = _source.Read();
             _last = state;
-        _post(new { type = "net", state = Name(state) });
+            _post(new { type = "net", state = Name(state) });
+        }
     }
 
     private void OnChanged()
     {
-        var state = _source.Read();
         lock (_gate)
         {
+            var state = _source.Read();
             if (_last == state)
                 return;
             _last = state;
+            _timing.Mark("net: " + Name(state));
+            _post(new { type = "net", state = Name(state) });
         }
-        _timing.Mark("net: " + Name(state));
-        _post(new { type = "net", state = Name(state) });
     }
 
     public void Dispose() => _source.Changed -= OnChanged;
