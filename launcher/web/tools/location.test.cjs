@@ -1034,3 +1034,46 @@ test('a v2 cache entry is still shown, with hyphens for what it lacks', async ()
   assert.ok(details.includes('Feels -'), details);
   assert.ok(details.includes('Humidity -'), details);
 });
+
+const netMsg = state => ({ type: 'net', state });
+
+// A fetch that always fails and counts its calls.
+function failingFetch() {
+  const urls = [];
+  const fn = url => { urls.push(url); return Promise.reject(new Error('offline')); };
+  fn.urls = urls;
+  return fn;
+}
+
+test('internet after local fetches at once, even inside the 2 minute wait', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  const before = page.fetch.urls.length;
+  assert.equal(before, 1);
+  page.deliver(netMsg('local'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, before, 'going offline fetches nothing');
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, before + 1);
+});
+
+test('internet after internet does not fetch', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(netMsg('internet'));
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, 1);
+});
+
+test('the first net message (internet) does not fetch', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, 1);
+});

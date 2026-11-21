@@ -285,6 +285,9 @@
     });
   }
 
+  // When the internet comes back the weather is fetched at once, not after the refresh interval or the wait after a failure.
+  function refreshWeatherNow() { lastAttempt = 0; refreshWeather(true); }
+
   // ---------- forecast detail tiles ----------
   // A value the weather service did not give shows a hyphen, never a number made up for it.
   var DASH = '-';
@@ -784,6 +787,7 @@
       if (state !== 'internet') netTimer = setTimeout(function () { netWrongLong = true; drawNetChip(); }, 10e3);
     }
     drawNetChip();
+    if (wasWrong && state === 'internet') refreshWeatherNow();
   });
 
   H.on('boost', function (msg) {
