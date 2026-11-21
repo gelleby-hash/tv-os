@@ -72,6 +72,21 @@ internal sealed class FakeAppView(string id, List<string> calls) : IAppView
         return Task.CompletedTask;
     }
 
+    /// <summary>Whether a player layer is open over its page (Prime Video's player).</summary>
+    public bool InPlayer { get; set; }
+
+    public Task<bool> InPlayerAsync()
+    {
+        calls.Add($"{id}.inPlayer");
+        return Task.FromResult(InPlayer);
+    }
+
+    public Task<bool> PressPlayerButtonAsync(string label)
+    {
+        calls.Add($"{id}.playerButton {label}");
+        return Task.FromResult(InPlayer);
+    }
+
     public Task DirectPauseAsync()
     {
         calls.Add($"{id}.directPause");

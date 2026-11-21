@@ -13,8 +13,10 @@ public sealed class KeyboardHookTests
     private static readonly int[] HomeKeys = [VkBrowserHome];
     private static readonly int[] ExtraKeys = [VkBrowserSearch, VkApps];
 
-    private static bool Swallow(int vkCode, bool appInFront = false, bool launcherInFront = true, int[]? homeKeys = null) =>
-        KeyboardHook.ShouldSwallow(homeKeys ?? HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, ExtraKeys, appInFront, launcherInFront, vkCode);
+    private const int VkMediaNextTrack = 176;
+
+    private static bool Swallow(int vkCode, bool appInFront = false, bool launcherInFront = true, int[]? homeKeys = null, bool appTakesNext = false) =>
+        KeyboardHook.ShouldSwallow(homeKeys ?? HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, ExtraKeys, appInFront, launcherInFront, vkCode, appTakesNext);
 
     [Fact]
     public void ShouldSwallow_ConfiguredHomeKey_Always()
@@ -51,8 +53,8 @@ public sealed class KeyboardHookTests
     public void ShouldSwallow_MenuWhileAppInFront_EvenWhenNotAnExtraKey()
     {
         // The 3-lines key opens the item menu in the app in front (2026-11-15), so it never reaches the app as a key.
-        Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], true, true, VkApps));
-        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, true, VkApps));
+        Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], true, true, VkApps, false));
+        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, true, VkApps, false));
     }
 
     [Fact]
@@ -60,8 +62,17 @@ public sealed class KeyboardHookTests
     {
         // The Search key frees and parks the remote's air mouse (2026-11-15), on the home screen and in an app alike.
         foreach (var appInFront in new[] { false, true })
-            Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], appInFront, true, VkBrowserSearch));
-        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, false, VkBrowserSearch));
+            Assert.True(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], appInFront, true, VkBrowserSearch, false));
+        Assert.False(KeyboardHook.ShouldSwallow(HomeKeys, VkBrowserBack, VkApps, VkBrowserSearch, [], false, false, VkBrowserSearch, false));
+    }
+
+    [Fact]
+    public void ShouldSwallow_NextKeyOnlyWhileAnAppThatTakesItIsInFront()
+    {
+        // Prime Video presses its Next Episode button for it (2026-11-15); YouTube gets the key itself, and skips.
+        Assert.True(Swallow(VkMediaNextTrack, appInFront: true, appTakesNext: true));
+        Assert.False(Swallow(VkMediaNextTrack, appInFront: true, appTakesNext: false));
+        Assert.False(Swallow(VkMediaNextTrack, appInFront: false, appTakesNext: true));
     }
 
     [Fact]

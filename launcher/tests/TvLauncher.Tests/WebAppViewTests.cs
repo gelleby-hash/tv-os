@@ -177,4 +177,26 @@ public sealed class WebAppViewTests
     }
 
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement;
+
+    [Theory]
+    [InlineData("{\"tvPointer\":\"wake\",\"x\":961,\"y\":540}", 961, 540)]
+    [InlineData("{\"tvPointer\":\"wake\",\"x\":0.5,\"y\":3}", 0.5, 3)]
+    public void PointerWake_IsReadWithItsPlace(string json, double x, double y)
+    {
+        Assert.Equal((x, y), WebAppView.PointerWake(json));
+    }
+
+    [Theory]
+    [InlineData("{\"tvPointer\":\"wake\"}")]
+    [InlineData("{\"tvPointer\":\"wake\",\"x\":\"961\",\"y\":540}")]
+    [InlineData("{\"tvPointer\":\"wake\",\"x\":-5,\"y\":540}")]
+    [InlineData("{\"tvPointer\":\"wake\",\"x\":99999,\"y\":540}")]
+    [InlineData("{\"tvPointer\":\"other\",\"x\":961,\"y\":540}")]
+    [InlineData("{\"tvMic\":\"stopped\"}")]
+    [InlineData("\"wake\"")]
+    [InlineData("not json")]
+    public void PointerWake_AnythingElseIsNone(string json)
+    {
+        Assert.Null(WebAppView.PointerWake(json));
+    }
 }

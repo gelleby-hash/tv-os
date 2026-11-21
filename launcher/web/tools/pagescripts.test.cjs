@@ -267,3 +267,70 @@ test('exit when empty: it watches the whole document, so a root added later is s
   assert.equal(p.observers[0].options.subtree, true);
   assert.equal(p.observers[0].options.childList, true);
 });
+
+// PageScripts.InPlayer and PageScripts.PressPlayerButton, run against a fake page. Prime Video plays in a layer fixed
+// over its title page, at the page's own address, so going back in history from its player left the season the
+// viewer had picked for the series' first (2026-11-15); Escape closes the player and keeps the page. Its controls are
+// in the page only after pointer activity (measured 2026-11-15), so a button is pressed a moment after a pointer move.
+const playerScript = (name, label) => {
+  const layer = source.match(/PlayerLayerScript = """\r?\n([\s\S]*?)\r?\n\s*""";/);
+  const m = source.match(new RegExp(name + String.raw` = """\r?\n([\s\S]*?)\r?\n\s*""";`));
+  assert.ok(layer && m, name + ' and PlayerLayerScript found in PageScripts.cs');
+  return m[1].replace('__LAYER__', layer[1]).replace('__LABEL__', JSON.stringify(label));
+};
+
+function fakeLayerPage({ fixed = true, size = [1920, 1080], controls = [] } = {}) {
+  const el = (tag, style = {}, rect = [0, 0, 0, 0]) => ({ tagName: tag, style: Object.assign({ position: 'static' }, style), parentElement: null, events: [],
+    getBoundingClientRect: () => ({ width: rect[2], height: rect[3] }), dispatchEvent(e) { this.events.push(e.type); return true; } });
+  const body = el('BODY');
+  const layer = el('DIV', { position: fixed ? 'fixed' : 'static' });
+  layer.parentElement = body;
+  const video = el('VIDEO', {}, [0, 0, ...size]);
+  video.parentElement = layer;
+  const buttons = controls.map(label => Object.assign(el('BUTTON'), { label, clicked: 0, textContent: '', getAttribute: (n) => (n === 'aria-label' ? label : null), click() { this.clicked++; } }));
+  layer.querySelectorAll = (sel) => (sel === 'button' ? page.shown ? buttons : [] : []);
+  const timers = [];
+  const page = { shown: false, body, layer, buttons, timers };
+  page.ctx = vm.createContext({
+    document: { body, querySelectorAll: (sel) => (sel === 'video' ? [video] : []), elementFromPoint: () => body },
+    innerWidth: 1920, innerHeight: 1080, Math,
+    getComputedStyle: (e) => e.style,
+    MouseEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+    PointerEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+  });
+  page.run = (script) => vm.runInContext(script, page.ctx);
+  return page;
+}
+
+test('in player: a video filling the screen in a fixed layer is a player; a big video in the page, or a small one, is not', () => {
+  assert.equal(fakeLayerPage().run(playerScript('InPlayerScript')), true);
+  assert.equal(fakeLayerPage({ fixed: false }).run(playerScript('InPlayerScript')), false);
+  assert.equal(fakeLayerPage({ size: [1280, 720] }).run(playerScript('InPlayerScript')), false);
+});
+
+test('player button: brings the controls with a pointer move, then presses the button with that label', () => {
+  const p = fakeLayerPage({ controls: ['Pause', 'Next Episode'] });
+  assert.equal(p.run(playerScript('PlayerButtonScript', 'Next Episode')), true, 'there is a player');
+  assert.ok(p.body.events.includes('mousemove') && p.body.events.includes('pointermove'));
+  assert.equal(p.buttons[1].clicked, 0, 'not before the controls are drawn');
+  p.shown = true;
+  assert.ok(p.timers.length === 1 && p.timers[0].ms >= 300);
+  p.timers[0].fn();
+  assert.deepEqual(p.buttons.map(b => b.clicked), [0, 1]);
+});
+
+test('player button: no player, nothing is moved or pressed', () => {
+  const p = fakeLayerPage({ fixed: false, controls: ['Next Episode'] });
+  assert.equal(p.run(playerScript('PlayerButtonScript', 'Next Episode')), false);
+  assert.deepEqual(p.body.events, []);
+  assert.equal(p.timers.length, 0);
+});
+
+test('player button: no button with that label once the controls are there (an advert), nothing is pressed', () => {
+  const p = fakeLayerPage({ controls: ['Go ad free'] });
+  p.run(playerScript('PlayerButtonScript', 'Next Episode'));
+  p.shown = true;
+  p.timers[0].fn();
+  assert.equal(p.buttons[0].clicked, 0);
+});

@@ -125,6 +125,8 @@ public sealed class AppSwitcher(
             var view = _views[id];
             if (_entries[id].Back == BackMode.Page)
                 await PressEscapeAsync(view);
+            else if (_entries[id].PlayerEscape && await InPlayerAsync(view))
+                await PressEscapeAsync(view);
             else if (view.CanGoBack)
                 view.GoBack();
             else
@@ -133,6 +135,46 @@ public sealed class AppSwitcher(
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>Whether the app in front presses its own next-episode button for the remote's next key (<c>NextButton</c>).</summary>
+    public bool AppTakesNextKey => CurrentAppId is { } id && _entries[id].NextButton is not null;
+
+    /// <summary>
+    /// The remote's next key, pressed while an app with <c>NextButton</c> is in front: its player's button for the next
+    /// episode (Prime Video, 2026-11-15). Nothing on the home screen, outside the player, or in another app.
+    /// </summary>
+    public async Task NextAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (CurrentAppId is not { } id || _entries[id].NextButton is not { } label)
+                return;
+            await _views[id].PressPlayerButtonAsync(label).WaitAsync(_pauseTimeout, _time);
+        }
+        catch (TimeoutException)
+        {
+            log?.Invoke("next: timed out");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Whether a player layer is open, capped like a key press: a hung page answers no, and Back goes on as before.
+    private async Task<bool> InPlayerAsync(IAppView view)
+    {
+        try
+        {
+            return await view.InPlayerAsync().WaitAsync(_pauseTimeout, _time);
+        }
+        catch (TimeoutException)
+        {
+            log?.Invoke($"back {view.Id}: the player check timed out");
+            return false;
         }
     }
 

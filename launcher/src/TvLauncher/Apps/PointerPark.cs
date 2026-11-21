@@ -49,6 +49,15 @@ public sealed class PointerPark
     /// <summary>Where the pointer goes: the middle of the spot.</summary>
     internal static (int X, int Y) Target(int x, int y, int width, int height) => (x + width / 2, y + height / 2);
 
+    /// <summary>
+    /// The spot's own answer to a window message, or null to leave it to Windows. A click never activates the spot:
+    /// despite WS_EX_NOACTIVATE, a click on it made it the active window, holding the keyboard so no key reached the
+    /// pages (seen on the box with the remote's air mouse on, 2026-11-15; reproduced on the dev PC). The click is
+    /// eaten too: <c>AirMouse</c> already turns the remote's clicks into OK and Back.
+    /// </summary>
+    internal static int? Answer(int message) =>
+        message == NativeMethods.WM_MOUSEACTIVATE ? NativeMethods.MA_NOACTIVATEANDEAT : null;
+
     /// <summary>Shows the spot in the corner of the launcher's screen and puts the pointer on it.</summary>
     public void Park()
     {
@@ -148,6 +157,13 @@ public sealed class PointerPark
             var style = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GWL_EXSTYLE).ToInt64();
             NativeMethods.SetWindowLongPtr(handle, NativeMethods.GWL_EXSTYLE,
                 new IntPtr(style | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW));
+            HwndSource.FromHwnd(handle)?.AddHook((IntPtr _, int message, IntPtr _, IntPtr _, ref bool handled) =>
+            {
+                if (Answer(message) is not { } answer)
+                    return IntPtr.Zero;
+                handled = true;
+                return new IntPtr(answer);
+            });
         };
         return spot;
     }
@@ -160,6 +176,7 @@ public sealed class PointerPark
         public const long WS_EX_TOOLWINDOW = 0x00000080;
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;
+        public const int WM_MOUSEACTIVATE = 0x0021, MA_NOACTIVATEANDEAT = 4;
         public static readonly IntPtr HWND_TOPMOST = new(-1);
 
         [StructLayout(LayoutKind.Sequential)]

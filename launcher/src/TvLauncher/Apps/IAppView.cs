@@ -28,6 +28,15 @@ public interface IAppView
     /// <summary>Presses the page's button with this label (its aria-label or its text), if there is one.</summary>
     Task PressButtonAsync(string label);
 
+    /// <summary>Whether a player layer is open over the page (Prime Video's player, which keeps the page's address).</summary>
+    Task<bool> InPlayerAsync();
+
+    /// <summary>
+    /// Presses the button with this label in the player layer, after a pointer move that shows its controls; false
+    /// when no player layer is open.
+    /// </summary>
+    Task<bool> PressPlayerButtonAsync(string label);
+
     /// <summary>Pauses the page's video element directly. Only for apps whose player survives it (YouTube).</summary>
     Task DirectPauseAsync();
 

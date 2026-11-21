@@ -138,6 +138,7 @@ public partial class MainWindow : Window
             _hook.HomePressed += OnHomePressed;
             _hook.BackPressed += OnBackPressed;
             _hook.MenuPressed += OnMenuPressed;
+            _hook.NextPressed += OnNextPressed;
             _hook.PointerKeyPressed += OnPointerKeyPressed;
             _hook.KeyReported += (vk, injected) => Log(
                 $"key: VK {vk}{(injected ? " injected" : "")} {_sinceStart.Elapsed.TotalSeconds:0.0} s after the start; "
@@ -261,6 +262,19 @@ public partial class MainWindow : Window
         }
     }
 
+    // Raised only while an app that presses its own next-episode button is in front (Prime Video).
+    private async void OnNextPressed(object? sender, EventArgs e)
+    {
+        try
+        {
+            await _switcher!.NextAsync();
+        }
+        catch (Exception ex)
+        {
+            Log("Next failed: " + ex.Message);
+        }
+    }
+
     private async void GoHome()
     {
         try
@@ -344,6 +358,8 @@ public partial class MainWindow : Window
     // A voice search ends when its app is no longer in front; then every phone hears what is.
     private void OnAppChanged()
     {
+        if (_hook is not null)
+            _hook.AppTakesNext = _switcher?.AppTakesNextKey ?? false;
         _mic?.OnAppChanged();
         SendState(null);
     }
@@ -460,6 +476,13 @@ public partial class MainWindow : Window
     private void KeepAskingForFront()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
+        // Turned off (a PC someone works at): one request, so the window they move to keeps the keyboard.
+        if (!_config.FrontAtStart)
+        {
+            if (_windows.TryActivate(hwnd) is { } problem)
+                Log("front: asked once at the start; " + problem);
+            return;
+        }
         var front = new FrontAtStart();
         string? firstProblem = null, lastProblem = null;
         var timer = new DispatcherTimer { Interval = FrontAtStart.AskEvery };

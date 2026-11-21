@@ -67,6 +67,23 @@ public sealed class PageScriptsTests
     }
 
     [Fact]
+    public void PlayerScripts_OnlyMeasureTheVideo_AndTheLabelIsAJsonString()
+    {
+        var press = PageScripts.PressPlayerButton("Next \"Episode\" </script>");
+
+        // pagescripts.test.cjs runs both against a fake page.
+        Assert.Contains("const want = \"Next \\u0022Episode\\u0022 \\u003C/script\\u003E\";", press);
+        foreach (var script in new[] { press, PageScripts.InPlayer })
+        {
+            Assert.DoesNotContain("__LAYER__", script);
+            Assert.DoesNotContain("__LABEL__", script);
+            Assert.Contains("getComputedStyle(p).position === 'fixed'", script);
+            Assert.DoesNotContain("pause(", script);
+            Assert.DoesNotContain("currentTime", script);
+        }
+    }
+
+    [Fact]
     public void PressButton_LabelIsAJsonString_AndTheVideoIsNeverTouched()
     {
         var script = PageScripts.PressButton("Pause \"now\" </script>");

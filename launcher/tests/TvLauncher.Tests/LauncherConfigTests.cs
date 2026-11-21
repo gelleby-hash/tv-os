@@ -73,6 +73,15 @@ public sealed class LauncherConfigTests : IDisposable
     }
 
     [Fact]
+    public void FrontAtStart_IsOnUnlessTurnedOff()
+    {
+        // On: the box at a boot, where Windows refused the first request. Off on a PC someone works at: the launcher
+        // took the keyboard back from Chrome for up to a minute after it started (owner, 2026-11-21).
+        Assert.True(LauncherConfig.Load(Write(ConfigJson())).FrontAtStart);
+        Assert.False(LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"FrontAtStart\": false,"))).FrontAtStart);
+    }
+
+    [Fact]
     public void Load_ParkPointer_IsRead()
     {
         var cfg = LauncherConfig.Load(Write(ConfigJson().Replace("\"HomeKeyVk\": 172,", "\"HomeKeyVk\": 172, \"ParkPointer\": true,")));
@@ -227,7 +236,7 @@ public sealed class LauncherConfigTests : IDisposable
         Assert.Equal("channel4", c4.GetProperty("id").GetString());
         Assert.Equal("tv", c4.GetProperty("version").GetString());
         Assert.Equal(["tv", "web"], c4.GetProperty("versions").EnumerateArray().Select(v => v.GetProperty("id").GetString()));
-        Assert.Equal(["Disney+"], page.GetProperty("boostApps").EnumerateArray().Select(b => b.GetString()));
+        Assert.Equal(["Disney+", "Prime Video"], page.GetProperty("boostApps").EnumerateArray().Select(b => b.GetString()));
         Assert.False(page.TryGetProperty("homeApps", out _));
         Assert.False(page.TryGetProperty("favoriteOrder", out _));
         Assert.False(page.GetProperty("defaults").TryGetProperty("hidden", out _));
@@ -808,6 +817,38 @@ public sealed class LauncherConfigTests : IDisposable
             LauncherConfig.Load(Write(OneApp(GoodFields + ", \"HideElements\": \" [data-testid=\\\"x\\\"]:has(a[href*=\\\"privacyprefs\\\"]) \""))).Apps.Single().Default.HideElements);
     }
 
+    [Fact]
+    public void NextButtonAndPlayerEscape_DefaultToNone_AndAreRead()
+    {
+        var plain = LauncherConfig.Load(Write(OneApp(GoodFields))).Apps.Single().Default;
+        Assert.Null(plain.NextButton);
+        Assert.False(plain.PlayerEscape);
+        Assert.Null(LauncherConfig.Load(Write(OneApp(GoodFields + ", \"NextButton\": \"  \""))).Apps.Single().Default.NextButton);
+        var set = LauncherConfig.Load(Write(OneApp(GoodFields + ", \"NextButton\": \" Next Episode \", \"PlayerEscape\": true"))).Apps.Single().Default;
+        Assert.Equal("Next Episode", set.NextButton);
+        Assert.True(set.PlayerEscape);
+    }
+
+    [Fact]
+    public void Load_ShippedDefault_PrimeClosesItsPlayerWithEscape_AndHasANextEpisodeButton()
+    {
+        // Back from Prime's player went back in history, to season 1 (2026-11-15); its button is "Next Episode".
+        var prime = LauncherConfig.Load(RepoConfigPath).Apps.Single(a => a.Id == "prime").Default;
+        Assert.True(prime.PlayerEscape);
+        Assert.Equal("Next Episode", prime.NextButton);
+        // Loud music and fights, quiet voices (owner, 2026-11-15): the boost Disney+ has; Prime's protected audio
+        // reaches the page's audio graph in WebView2 (measured 2026-11-15).
+        Assert.Equal(4, prime.BoostGain);
+        // The boost's audio graph starts only without a click with this, as on Disney+: without it the episode
+        // stopped at 7 s with the graph suspended (dev PC, 2026-11-15).
+        Assert.Contains("--autoplay-policy=no-user-gesture-required", prime.BrowserArgs);
+        foreach (var other in LauncherConfig.Load(RepoConfigPath).Apps.Where(a => a.Id != "prime").SelectMany(a => a.Versions))
+        {
+            Assert.False(other.PlayerEscape, other.Id);
+            Assert.Null(other.NextButton);
+        }
+    }
+
     [Theory]
     [InlineData("div { color: red }")]
     [InlineData("div}")]
@@ -826,7 +867,7 @@ public sealed class LauncherConfigTests : IDisposable
     {
         var root = ParsedScriptConfig(PageScript(LauncherConfig.Load(RepoConfigPath)));
 
-        Assert.Equal(["Disney+"], root.GetProperty("boostApps").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["Disney+", "Prime Video"], root.GetProperty("boostApps").EnumerateArray().Select(e => e.GetString()));
     }
 
     [Fact]

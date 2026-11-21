@@ -36,6 +36,7 @@ public sealed class KeyboardHook : IDisposable
     private readonly HomeKeyFilter _backFilter;
     private readonly HomeKeyFilter _menuFilter;
     private readonly HomeKeyFilter _pointerFilter;
+    private readonly HomeKeyFilter _nextFilter = new([NextTrackVk]);
     private readonly SynchronizationContext? _context;
     // Held in a field so the garbage collector cannot free the delegate while Windows still calls it.
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
@@ -107,6 +108,21 @@ public sealed class KeyboardHook : IDisposable
     /// <summary>Raised like <see cref="BackPressed"/>, for a press of the pointer key while <see cref="LauncherInFront"/>.</summary>
     public event EventHandler? PointerKeyPressed;
 
+    /// <summary>The media key for the next track: the Rii's forward button and the phone's next (measured 2026-11-15).</summary>
+    public const int NextTrackVk = 176;
+
+    /// <summary>
+    /// Raised like <see cref="BackPressed"/>, for a press of the next-track key while <see cref="AppTakesNext"/> and an
+    /// app is in front.
+    /// </summary>
+    public event EventHandler? NextPressed;
+
+    /// <summary>
+    /// True while the app in front presses its own button for the next-track key (<c>NextButton</c>, Prime Video); set
+    /// by the window. Otherwise the key reaches the app, as YouTube needs. Read on the hook thread, so volatile.
+    /// </summary>
+    public volatile bool AppTakesNext;
+
     /// <summary>True while an app is in front, set by the window. Read on the hook thread, so volatile.</summary>
     public volatile bool AppInFront;
 
@@ -145,6 +161,7 @@ public sealed class KeyboardHook : IDisposable
             var vkCode = (int)info.vkCode;
             var appInFront = AppInFront;
             var launcherInFront = LauncherInFront;
+            var appTakesNext = AppTakesNext;
             // TickCount64 rather than info.time, which is 32-bit and wraps after 49.7 days of uptime.
             var now = Environment.TickCount64;
             if (TakeReport(ref _reportKeys, keyDown))
@@ -157,7 +174,9 @@ public sealed class KeyboardHook : IDisposable
                 RaiseMenuPressed();
             else if (launcherInFront && _pointerFilter.ShouldTrigger(vkCode, keyDown, now))
                 RaisePointerKeyPressed();
-            if (ShouldSwallow(_homeVks, _backVk, _menuVk, _pointerVk, _swallowVks, appInFront, launcherInFront, vkCode))
+            else if (appInFront && appTakesNext && _nextFilter.ShouldTrigger(vkCode, keyDown, now))
+                Raise(NextPressed);
+            if (ShouldSwallow(_homeVks, _backVk, _menuVk, _pointerVk, _swallowVks, appInFront, launcherInFront, vkCode, appTakesNext))
                 return 1;
         }
         return NativeMethods.CallNextHookEx(IntPtr.Zero, code, message, data);
@@ -165,13 +184,16 @@ public sealed class KeyboardHook : IDisposable
 
     /// <summary>
     /// Every event of a Home key is kept from the app in front, of the Back and menu keys while an app is in front,
-    /// and of the pointer key and the extra keys while the launcher is in front.
+    /// of the next-track key while an app that takes it is in front, and of the pointer key and the extra keys while
+    /// the launcher is in front.
     /// Whether Windows flagged the event as injected is not asked (see the class summary).
     /// </summary>
     internal static bool ShouldSwallow(
-        IReadOnlyList<int> homeVks, int backVk, int menuVk, int pointerVk, IReadOnlyList<int> swallowVks, bool appInFront, bool launcherInFront, int vkCode) =>
+        IReadOnlyList<int> homeVks, int backVk, int menuVk, int pointerVk, IReadOnlyList<int> swallowVks, bool appInFront, bool launcherInFront, int vkCode,
+        bool appTakesNext) =>
         homeVks.Contains(vkCode)
         || (appInFront && (vkCode == backVk || vkCode == menuVk))
+        || (appInFront && appTakesNext && vkCode == NextTrackVk)
         || (launcherInFront && vkCode == pointerVk)
         || (launcherInFront && swallowVks.Contains(vkCode));
 
@@ -220,6 +242,14 @@ public sealed class KeyboardHook : IDisposable
             _context.Post(_ => PointerKeyPressed?.Invoke(this, EventArgs.Empty), null);
         else
             ThreadPool.QueueUserWorkItem(_ => PointerKeyPressed?.Invoke(this, EventArgs.Empty));
+    }
+
+    private void Raise(EventHandler? handler)
+    {
+        if (_context is not null)
+            _context.Post(_ => handler?.Invoke(this, EventArgs.Empty), null);
+        else
+            ThreadPool.QueueUserWorkItem(_ => handler?.Invoke(this, EventArgs.Empty));
     }
 
     private void RaiseMenuPressed()

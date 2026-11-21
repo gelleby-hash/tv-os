@@ -41,8 +41,14 @@ class El {
   appendChild(k) { return this.add(k), k; }
   get parentNode() { return this.parentElement; }
   getAttribute(n) { return n in this.attrs ? String(this.attrs[n]) : null; }
+  setAttribute(n, v) { this.attrs[n] = String(v); }
+  removeAttribute(n) { delete this.attrs[n]; }
   hasAttribute(n) { return n in this.attrs; }
-  getBoundingClientRect() { const [left, top, width, height] = this.rect; return { left, top, width, height, right: left + width, bottom: top + height }; }
+  // As in a browser, an element in something not displayed measures nothing.
+  getBoundingClientRect() {
+    for (let e = this; e; e = e.parentElement) if (e.style.display === 'none') return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
+    const [left, top, width, height] = this.rect; return { left, top, width, height, right: left + width, bottom: top + height };
+  }
   contains(o) { for (let p = o; p; p = p.parentElement) if (p === this) return true; return false; }
   closest(sel) {
     // Only the selectors the script uses: [attr], [attr="value"] and .class.
@@ -71,6 +77,7 @@ class El {
   // Records what the script sends it: a pointer as type@x,y, a key as type:key.
   dispatchEvent(e) { (this.events = this.events || []).push(e.key !== undefined ? e.type + ':' + e.key : e.type + '@' + e.clientX + ',' + e.clientY); return true; }
   scrollIntoView(opts) { this.scrolled = opts; }
+  click() { this.clicks = (this.clicks || 0) + 1; }
 }
 
 let page;
@@ -204,7 +211,8 @@ function run(doc, pathname, parts, [width, height] = [1920, 1080]) {
   const scrolls = [];
   const ctx = vm.createContext({
     document: doc,
-    window: { addEventListener: (type, fn, capture) => handlers.push({ type, fn, capture }), scrollBy: (o) => scrolls.push(o) },
+    window: { addEventListener: (type, fn, capture) => handlers.push({ type, fn, capture }), scrollBy: (o) => scrolls.push(o),
+      chrome: { webview: { postMessage: (m) => page.posted.push(m) } } },
     location: { pathname },
     innerWidth: width,
     innerHeight: height,
@@ -220,7 +228,7 @@ function run(doc, pathname, parts, [width, height] = [1920, 1080]) {
     // Kept until a test runs them with page.runTimers().
     setTimeout: (fn) => { page.timers.push(fn); return page.timers.length; },
   });
-  page = Object.assign({ document: doc, handlers, warnings, scrolls, clock: 0, tick: 1000, timers: [] }, parts);
+  page = Object.assign({ document: doc, handlers, warnings, scrolls, clock: 0, tick: 1000, timers: [], posted: [] }, parts);
   page.runTimers = () => { const t = page.timers.splice(0); for (const fn of t) fn(); };
   vm.runInContext(script, ctx, { filename: 'ArrowNav' });
   return page;
@@ -852,4 +860,147 @@ test('arrows: the menu key on an item with no hover card leaves things as they w
   menu(p);
   p.runTimers();
   assert.equal(p.document.activeElement, p.document.body, 'nothing focused: nothing to hover');
+});
+
+// Prime Video's player as measured on 2026-11-15 at 1920 x 1080 (Vox Machina S1, near an episode's end): the layer
+// fixed over the title page, its controls drawn only after pointer activity (none in the page while idle), a top bar,
+// a bottom row (skip back, pause, skip forward), Next Episode at the bottom right and the Next Up card's Hide above
+// it. In the player Prime takes Left and Right to seek and Up and Down for its own volume, so no key reached a button.
+function playerPage() {
+  const p = titlePage();
+  p.showPlayer();
+  const controls = new El('div', {}, [0, 0, 1920, 1080], { display: 'none' });
+  const b = (label, rect) => new El('button', { 'aria-label': label }, rect);
+  const close = b('Close player', [38, 29, 61, 61]), subtitles = b('Turn on subtitles', [1517, 29, 61, 61]);
+  const back10 = b('Skip back 10 seconds', [844, 983, 61, 61]), pause = b('Pause', [919, 973, 82, 82]);
+  const fwd10 = b('Skip forward 10 seconds', [1015, 983, 61, 61]), nextEp = b('Next Episode', [1694, 989, 174, 49]);
+  const hide = b('Hide', [1823, 813, 58, 23]);
+  p.layer.add(controls.add(close, subtitles, back10, pause, fwd10, nextEp, hide));
+  Object.assign(p, { controls, close, subtitles, back10, pause, fwd10, nextEp, hide });
+  p.showControls = () => { controls.style.display = 'block'; };
+  p.inside.focus();
+  return p;
+}
+const kept = (ev) => ev.prevented && ev.stopped;
+
+test('player: Up or Down picks the button nearest the bottom middle, and the player never sees the key', () => {
+  for (const key of ['ArrowDown', 'ArrowUp']) {
+    const p = playerPage();
+    p.showControls();
+    const ev = press(p, key);
+    assert.ok(kept(ev), key + ' is not the player volume');
+    assert.equal(focused(p), 'Pause', key);
+  }
+});
+
+test('player: with the controls not drawn yet, Up or Down shows them and picks once they are there', () => {
+  const p = playerPage();
+  const ev = press(p, 'ArrowDown');
+  assert.ok(kept(ev));
+  assert.ok((p.document.body.events || []).some(m => m.startsWith('mousemove@')), 'the pointer nudge that brings the controls');
+  assert.equal(focused(p), 'Rating', 'nothing to pick yet');
+  p.showControls();
+  p.runTimers();
+  assert.equal(focused(p), 'Pause');
+});
+
+test('player: with a button picked, the arrows move between the buttons and the player never sees them', () => {
+  const p = playerPage();
+  p.showControls();
+  press(p, 'ArrowDown');
+  const steps = [['ArrowRight', 'Skip forward 10 seconds'], ['ArrowRight', 'Next Episode'], ['ArrowUp', 'Hide'],
+    ['ArrowDown', 'Next Episode'], ['ArrowLeft', 'Skip forward 10 seconds'], ['ArrowLeft', 'Pause'], ['ArrowLeft', 'Skip back 10 seconds']];
+  for (const [key, want] of steps) {
+    const ev = press(p, key);
+    assert.ok(kept(ev), key);
+    assert.equal(focused(p), want, key);
+  }
+});
+
+test('player: OK presses the picked button, and the player never sees the key', () => {
+  const p = playerPage();
+  p.showControls();
+  press(p, 'ArrowDown');
+  press(p, 'ArrowRight');
+  press(p, 'ArrowRight');
+  const ev = press(p, 'Enter');
+  assert.ok(kept(ev));
+  assert.equal(p.nextEp.clicks, 1);
+});
+
+test('player: Up past the top row or Down past the bottom row goes back to watching, where Left and Right seek', () => {
+  for (const [start, key] of [['close', 'ArrowUp'], ['pause', 'ArrowDown']]) {
+    const p = playerPage();
+    p.showControls();
+    p[start].focus();
+    assert.ok(kept(press(p, key)), key);
+    assert.equal(p.document.activeElement, p.layer, key + ': the focus is on the player again');
+    const ev = press(p, 'ArrowLeft');
+    assert.equal(ev.prevented || ev.stopped, false, 'Left goes to the player, which seeks');
+  }
+});
+
+test("player: while nothing is picked, Left, Right and OK are the player's; once the controls fade, so are they again", () => {
+  const p = playerPage();
+  p.showControls();
+  for (const key of ['ArrowLeft', 'ArrowRight', 'Enter']) assert.equal(press(p, key).prevented, false, key);
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Pause');
+  p.controls.style.display = 'none';
+  const ev = press(p, 'ArrowRight');
+  assert.equal(ev.prevented || ev.stopped, false, 'the controls faded: Right seeks');
+  assert.equal(p.pause.clicks, undefined);
+});
+
+test('player: a player page of its own (/play/) keeps Up and Down', () => {
+  const p = homePage({ pathname: '/en-gb/play/0818ff05' });
+  p.top.tiles[0].focus();
+  const ev = press(p, 'ArrowDown');
+  assert.equal(ev.prevented || ev.stopped, false);
+});
+
+// Prime draws its controls only for a real mouse move: a DevTools mouse move brought 13 buttons, scripted pointer and
+// mouse events none (measured 2026-11-15). The page asks the launcher for one, at the middle of the screen.
+test('player: each key in a player layer asks the launcher for a real mouse move, a pixel apart each time', () => {
+  const p = playerPage();
+  press(p, 'ArrowRight');
+  press(p, 'ArrowDown');
+  assert.equal(p.posted.length, 2);
+  assert.equal(p.posted[0].tvPointer, 'wake');
+  assert.ok(Math.abs(p.posted[0].x - 960) <= 2 && p.posted[0].y === 540, JSON.stringify(p.posted[0]));
+  assert.notEqual(p.posted[0].x, p.posted[1].x);
+});
+
+test('player: no mouse move is asked for away from a player layer, or on a player page of its own', () => {
+  const t = titlePage();
+  t.trailer.focus();
+  press(t, 'ArrowDown');
+  const own = homePage({ pathname: '/en-gb/play/0818ff05' });
+  press(own, 'ArrowRight');
+  assert.deepEqual([t.posted, own.posted], [[], []]);
+});
+
+test('player: picking tries again a little later when the controls are slow to come', () => {
+  const p = playerPage();
+  press(p, 'ArrowDown');
+  p.runTimers();
+  assert.equal(focused(p), 'Rating', 'still nothing drawn at the first try');
+  p.showControls();
+  p.runTimers();
+  assert.equal(focused(p), 'Pause');
+});
+
+// Prime draws no focus mark on its player buttons (the picked one measured outline none and a clear background,
+// 2026-11-15), so a picked button was invisible: the launcher marks it.
+test('player: the picked button carries the mark, which moves with it and goes when watching again', () => {
+  const p = playerPage();
+  p.showControls();
+  press(p, 'ArrowDown');
+  assert.ok(p.pause.hasAttribute('data-tv-pick'));
+  assert.ok(p.document.head.children.some(c => /\[data-tv-pick\][^{]*\{[^}]*outline/.test(c.textContent || '')), 'a style draws it');
+  press(p, 'ArrowRight');
+  assert.ok(p.fwd10.hasAttribute('data-tv-pick') && !p.pause.hasAttribute('data-tv-pick'));
+  press(p, 'ArrowDown');
+  assert.equal(p.document.activeElement, p.layer);
+  assert.ok(!p.fwd10.hasAttribute('data-tv-pick'));
 });

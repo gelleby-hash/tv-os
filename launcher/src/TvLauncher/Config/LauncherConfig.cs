@@ -36,7 +36,9 @@ public sealed record AppEntry(
     string VersionName,
     string ProfileId,
     string? ExitWhenEmpty = null,
-    string? HideElements = null);
+    string? HideElements = null,
+    string? NextButton = null,
+    bool PlayerEscape = false);
 
 /// <summary>An app the family picks on the home row, with one or more versions; the first is the default.</summary>
 public sealed record AppDefinition(string Id, string Name, string? Icon, IReadOnlyList<AppEntry> Versions)
@@ -100,6 +102,11 @@ public sealed class LauncherConfig
     /// <summary>Whether the launcher keeps the mouse pointer on a small spot of its own in the screen's corner (the mini PC).</summary>
     public bool ParkPointer { get; }
     /// <summary>
+    /// Whether the launcher keeps asking for the front after it starts, until it has held it (<c>FrontAtStart</c> in
+    /// Apps): the box at a boot. Off, it asks once, so a PC someone works at keeps the window they move to.
+    /// </summary>
+    public bool FrontAtStart { get; }
+    /// <summary>
     /// Part of the raw input name of the remote's dongle (the Rii i25's is <c>VID_1997&amp;PID_2433</c>), whose air
     /// mouse is kept on the parked spot and whose clicks count as OK and Back; null for none. Only with <see cref="ParkPointer"/>.
     /// </summary>
@@ -128,6 +135,7 @@ public sealed class LauncherConfig
         MotionTime = raw.MotionTime;
         AllowClose = raw.AllowClose;
         ParkPointer = raw.ParkPointer;
+        FrontAtStart = raw.FrontAtStart;
         AirMouseDevice = string.IsNullOrWhiteSpace(raw.AirMouseDevice) ? null : raw.AirMouseDevice.Trim();
         PointerKeyVk = raw.PointerKeyVk;
         SpotlightFolders = raw.SpotlightFolders!.Select(f => Environment.ExpandEnvironmentVariables(f!)).ToList();
@@ -261,7 +269,9 @@ public sealed class LauncherConfig
             versionName,
             profileId,
             string.IsNullOrWhiteSpace(a.ExitWhenEmpty) ? null : a.ExitWhenEmpty.Trim(),
-            string.IsNullOrWhiteSpace(a.HideElements) ? null : a.HideElements.Trim());
+            string.IsNullOrWhiteSpace(a.HideElements) ? null : a.HideElements.Trim(),
+            string.IsNullOrWhiteSpace(a.NextButton) ? null : a.NextButton.Trim(),
+            a.PlayerEscape ?? false);
     }
 
     // Missing means no configured place: the viewer's choice or Windows location decides (LocationResolver).
@@ -332,6 +342,10 @@ public sealed class LauncherConfig
         public bool AllowClose { get; set; }
         // Off unless set: it moves the pointer, which a PC used with a mouse does not want.
         public bool ParkPointer { get; set; }
+        // On unless turned off: at a boot Windows refused the box's first request for the front (2026-11-06 and
+        // 2026-11-07). On a PC someone works at it took the keyboard back from Chrome for up to a minute (owner,
+        // 2026-11-21), so the dev PC turns it off.
+        public bool FrontAtStart { get; set; } = true;
         public string? AirMouseDevice { get; set; }
         // VK_BROWSER_SEARCH: what the Rii i25's Search key sends (measured 2026-10-26 and 2026-11-15).
         public int PointerKeyVk { get; set; } = 170;
@@ -365,6 +379,12 @@ public sealed class LauncherConfig
         // A CSS selector: what it matches is never shown (PageScripts.HideElements; Prime Video's cookie notice, which
         // the remote's arrows cannot reach).
         public string? HideElements { get; set; }
+        // The label of the player's button for the next episode, pressed for the remote's next key (Prime Video:
+        // "Next Episode"). Without it the key reaches the page, as YouTube needs.
+        public string? NextButton { get; set; }
+        // Back in a player layer over the page presses Escape, which closes it, instead of going back in history
+        // (Prime Video: its player has no history entry, so Back left the season picked, 2026-11-15).
+        public bool? PlayerEscape { get; set; }
         // The versions of this app, each read with the rules of an app's own fields (a Url and the rest).
         public List<RawApp?>? Versions { get; set; }
 

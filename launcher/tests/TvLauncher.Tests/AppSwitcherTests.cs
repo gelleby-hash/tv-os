@@ -657,6 +657,80 @@ public sealed class AppSwitcherTests
         Assert.Empty(_calls);
     }
 
+    // Prime Video plays in a layer over its title page with no history entry of its own: Back went back in history
+    // from the player, to the page before, so a season 4 episode left the viewer on season 1 (owner, 2026-11-15).
+    // Escape closes Prime's player and keeps the page (measured 2026-11-15).
+    [Fact]
+    public async Task Back_InPrimesPlayer_PressesEscape_NotHistory()
+    {
+        var sw = Switcher();
+        await sw.OpenAsync("prime");
+        View("prime").CanGoBack = true;
+        View("prime").InPlayer = true;
+        _calls.Clear();
+
+        await sw.BackAsync();
+
+        Assert.Equal(["prime.inPlayer", "prime.key Escape"], _calls);
+    }
+
+    [Fact]
+    public async Task Back_OnPrimesPages_GoesBackInHistory()
+    {
+        var sw = Switcher();
+        await sw.OpenAsync("prime");
+        View("prime").CanGoBack = true;
+        _calls.Clear();
+
+        await sw.BackAsync();
+
+        Assert.Equal(["prime.inPlayer", "prime.goBack"], _calls);
+    }
+
+    [Fact]
+    public async Task Back_InAnAppWithoutPlayerEscape_NeverAsksAboutAPlayer()
+    {
+        var sw = Switcher();
+        await sw.OpenAsync("disney");
+        View("disney").CanGoBack = true;
+        View("disney").InPlayer = true;
+        _calls.Clear();
+
+        await sw.BackAsync();
+
+        Assert.Equal(["disney.goBack"], _calls);
+    }
+
+    // The remote's next key in Prime's player: its own Next Episode button (owner, 2026-11-15).
+    [Fact]
+    public async Task Next_InPrime_PressesItsNextEpisodeButton()
+    {
+        var sw = Switcher();
+        await sw.OpenAsync("prime");
+        _calls.Clear();
+
+        Assert.True(sw.AppTakesNextKey);
+        await sw.NextAsync();
+
+        Assert.Equal(["prime.playerButton Next Episode"], _calls);
+    }
+
+    [Fact]
+    public async Task Next_AnAppWithoutNextButton_OrNoApp_KeepsItsOwnKeyAndNothingIsDone()
+    {
+        // YouTube skips to the next video with the key itself (owner, 2026-11-15), so the key must reach it.
+        var sw = Switcher();
+        Assert.False(sw.AppTakesNextKey);
+        await sw.NextAsync();
+        await sw.OpenAsync("youtube");
+        _calls.Clear();
+
+        Assert.False(sw.AppTakesNextKey);
+        await sw.NextAsync();
+
+        Assert.Empty(_calls);
+    }
+
     [Fact]
     public async Task Back_NoApp_DoesNothing()
     {

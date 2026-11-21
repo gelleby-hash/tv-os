@@ -133,7 +133,8 @@ public sealed class WebAppView : IAppView
             await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.ArrowNav);
         if (_entry.PhoneMic)
             await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.PhoneMic);
-        if (_entry.PhoneMic || _entry.ExitWhenEmpty is not null)
+        // ArrowNav asks for a real mouse move in a player that shows its controls only for one.
+        if (_entry.PhoneMic || _entry.ExitWhenEmpty is not null || _entry.ArrowNav)
             core.WebMessageReceived += OnWebMessageReceived;
         if (_entry.BoostGain is not null)
             _boostScriptId = await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.Boost(boostGain));
@@ -154,6 +155,25 @@ public sealed class WebAppView : IAppView
     public Task PressButtonAsync(string label) => Core.ExecuteScriptAsync(PageScripts.PressButton(label));
 
     public Task DirectPauseAsync() => Core.ExecuteScriptAsync(PageScripts.DirectPause);
+
+    public async Task<bool> InPlayerAsync() => await Core.ExecuteScriptAsync(PageScripts.InPlayer) == "true";
+
+    // Prime Video draws its controls only for a real mouse move (measured 2026-11-15), so one goes first, and only in
+    // its player: on a title page a mouse move opens the hover card of the item under it.
+    public async Task<bool> PressPlayerButtonAsync(string label)
+    {
+        if (!await InPlayerAsync())
+            return false;
+        var x = Math.Round(_webView.ActualWidth / 2);
+        var y = Math.Round(_webView.ActualHeight / 2);
+        await MovePointerAsync(x - 1, y);
+        await MovePointerAsync(x + 1, y);
+        return await Core.ExecuteScriptAsync(PageScripts.PressPlayerButton(label)) == "true";
+    }
+
+    // A real mouse move inside the page, through DevTools: the page sees a trusted event, and Windows' pointer stays put.
+    private Task MovePointerAsync(double x, double y) =>
+        Core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(new { type = "mouseMoved", x, y }));
 
     // Armed first and the key pressed only once that has returned: the arming and the key take different routes
     // into the page, and YouTube asks for the microphone as soon as it has the key. Without the script (no
@@ -278,6 +298,31 @@ public sealed class WebAppView : IAppView
         }
     }
 
+    /// <summary>
+    /// The place of the page's <c>{"tvPointer":"wake","x":..,"y":..}</c>: the arrows' script asks for a real mouse move
+    /// there, in a player that shows its controls only for one (<see cref="PageScripts.ArrowNav"/>). Null for anything
+    /// else, and for a place off any screen. Never throws, whatever the page sent.
+    /// </summary>
+    internal static (double X, double Y)? PointerWake(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("tvPointer", out var kind) || kind.ValueKind != JsonValueKind.String || !kind.ValueEquals("wake")
+                || !root.TryGetProperty("x", out var x) || x.ValueKind != JsonValueKind.Number
+                || !root.TryGetProperty("y", out var y) || y.ValueKind != JsonValueKind.Number)
+                return null;
+            var (px, py) = (x.GetDouble(), y.GetDouble());
+            return px is >= 0 and <= 10000 && py is >= 0 and <= 10000 ? (px, py) : null;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The page says the app emptied itself, its own exit (<see cref="PageScripts.ExitWhenEmpty"/>).</summary>
     internal static bool IsExitRequested(string json)
     {
@@ -372,7 +417,8 @@ public sealed class WebAppView : IAppView
         _failure.Visibility = Visibility.Visible;
     }
 
-    // Any page in this view can post; only the microphone script's "stopped" means anything here.
+    // Any page in this view can post; only the microphone script's "stopped", an emptied page and the arrows' request
+    // for a mouse move mean anything here.
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         string json;
@@ -391,6 +437,22 @@ public sealed class WebAppView : IAppView
         {
             _log($"view {Id}: the page emptied itself, its own exit");
             CloseRequested?.Invoke();
+        }
+        else if (PointerWake(json) is { } at)
+            _ = WakeAsync(at.X, at.Y);
+    }
+
+    // Two steps: a single first move brought Prime's controls no mouse event (measured 2026-11-15).
+    private async Task WakeAsync(double x, double y)
+    {
+        try
+        {
+            await MovePointerAsync(x, y - 1);
+            await MovePointerAsync(x, y);
+        }
+        catch (Exception ex)
+        {
+            _log($"view {Id}: the mouse move for the player failed: {ex.Message}");
         }
     }
 

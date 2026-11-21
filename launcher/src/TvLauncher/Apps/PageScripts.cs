@@ -34,6 +34,56 @@ internal static class PageScripts
     /// <summary>Presses the button with this label. The label goes in as a JSON string, so no label can end the script.</summary>
     public static string PressButton(string label) => PressButtonScript.Replace("__LABEL__", JsonSerializer.Serialize(label));
 
+    // The player layer, as ArrowNav finds it: a video filling the screen inside a layer fixed over the page, a player
+    // that keeps the page's address (Prime Video, 2026-11-14). Null when there is none.
+    private const string PlayerLayerScript = """
+        const layer = (() => {
+          for (const v of document.querySelectorAll('video')) {
+            const r = v.getBoundingClientRect();
+            if (r.width < innerWidth * 0.9 || r.height < innerHeight * 0.9) continue;
+            for (let p = v; p; p = p.parentElement) if (getComputedStyle(p).position === 'fixed') return p;
+          }
+          return null;
+        })();
+        """;
+
+    // Whether a player layer is open. Prime Video's player opens over the title page without a history entry, so
+    // going back in history from it left the season picked for the series' first (2026-11-15); Escape closes it.
+    private const string InPlayerScript = """
+        (() => {
+          __LAYER__
+          return !!layer;
+        })()
+        """;
+
+    // Presses a button of the player layer by its label, its aria-label or its text. Prime Video draws its controls
+    // only after pointer activity (none in the page while idle, 2026-11-15), so a pointer move goes first and the
+    // press a moment later. True when there is a player layer, whether or not it then has the button (an advert
+    // shows Go ad free in place of Next Episode).
+    private const string PlayerButtonScript = """
+        (() => {
+          const want = __LABEL__;
+          __LAYER__
+          if (!layer) return false;
+          const at = { bubbles: true, composed: true, clientX: Math.round(innerWidth / 2) + 2, clientY: Math.round(innerHeight / 2) };
+          const target = document.elementFromPoint(at.clientX, at.clientY) || document.body;
+          target.dispatchEvent(new PointerEvent('pointermove', at));
+          target.dispatchEvent(new MouseEvent('mousemove', at));
+          setTimeout(() => {
+            for (const b of layer.querySelectorAll('button'))
+              if ((b.getAttribute('aria-label') || b.textContent || '').trim() === want) { b.click(); return; }
+          }, 400);
+          return true;
+        })()
+        """;
+
+    /// <summary>Whether a player layer is open over the page (Prime Video's player).</summary>
+    public static readonly string InPlayer = InPlayerScript.Replace("__LAYER__", PlayerLayerScript);
+
+    /// <summary>Presses the player layer's button with this label, after showing its controls; false when no player is open.</summary>
+    public static string PressPlayerButton(string label) =>
+        PlayerButtonScript.Replace("__LAYER__", PlayerLayerScript).Replace("__LABEL__", JsonSerializer.Serialize(label));
+
     // Runs in every page before its own scripts, when the document has no root element at all (measured in Chromium:
     // documentElement and head are both null). So it waits for the root element, then adds the style once. WebView2
     // draws a classic 15 px scrollbar on Disney+ (measured), where Edge's app window did not; a TV has no use for one,
@@ -223,10 +273,10 @@ internal static class PageScripts
             return (shown.find(f => fromBar || !pinned(f.e)) || shown[0] || {}).e;
           };
 
-          const next = (cur, d) => {
+          const next = (cur, d, root) => {
             const c = face(cur).getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
             const found = [], fromBar = pinned(cur);
-            for (const { e, r } of items(cur.closest('[role="dialog"]') || document)) {
+            for (const { e, r } of items(root || cur.closest('[role="dialog"]') || document)) {
               if (e === cur || e.contains(cur) || cur.contains(e)) continue;
               // Laid over the item in focus, not beside it: Prime Video's focus card puts the episode's Download button
               // in the corner of its picture (2026-11-15).
@@ -322,6 +372,64 @@ internal static class PageScripts
               altKey: ev.altKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, shiftKey: ev.shiftKey, bubbles: true, cancelable: true, composed: true }));
           };
 
+          // The buttons in a player layer, picked with Up and Down. Prime Video's player takes Left and Right to seek and
+          // Up and Down for its own volume, so no key reached its buttons: Next Episode, the Next Up card's Hide, Like
+          // (owner, 2026-11-15; the remote has its own volume keys). It draws them only after pointer activity, which
+          // each key in the player sends. Up or Down picks the one nearest the bottom middle (pause), then the arrows
+          // move between them and OK presses one; Up past the top row or Down past the bottom row goes back to
+          // watching. Left, Right and OK stay the player's while nothing is picked, and again once the controls fade.
+          const startIn = (layer) => {
+            const found = [];
+            for (const { e, r } of items(layer)) if (onScreen(r))
+              found.push({ e, score: Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight) });
+            return rank(found, true);
+          };
+          // Prime draws no focus mark on its player buttons (outline none, a clear background, 2026-11-15): the
+          // picked one gets the launcher's own.
+          let marked = null;
+          const pickStyle = document.createElement('style');
+          pickStyle.textContent = '[data-tv-pick] { outline: 3px solid #fff !important; outline-offset: 4px !important; }';
+          const mark = (e) => {
+            if (marked && marked !== e) marked.removeAttribute('data-tv-pick');
+            marked = e;
+            if (!e) return;
+            if (!pickStyle.parentNode) (document.head || document.documentElement).appendChild(pickStyle);
+            e.setAttribute('data-tv-pick', '');
+          };
+          const pickKey = (layer, ev) => {
+            const d = DIRS[ev.key];
+            if ((!d && ev.key !== 'Enter') || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return false;
+            const cur = deep();
+            const picked = cur && cur !== layer && items(layer).some(i => i.e === cur);
+            if (!picked && (!d || d[1] === 0)) return false;
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            if (picked && !d) { cur.click(); return true; }
+            if (picked) {
+              const to = next(cur, d, layer);
+              if (to) { to.focus({ preventScroll: true }); mark(to); }
+              else if (d[1] !== 0) { layer.focus({ preventScroll: true }); mark(null); }
+              return true;
+            }
+            // The controls come a moment after the launcher's mouse move, so a press with none yet tries again.
+            const pick = () => { const to = startIn(layer); if (to) { to.focus({ preventScroll: true }); mark(to); } return !!to; };
+            const later = (waits) => setTimeout(() => {
+              try { if (!pick() && waits.length > 1) later(waits.slice(1)); } catch (e) { console.warn('tv player buttons', e); }
+            }, waits[0]);
+            if (!pick()) later([250, 350]);
+            return true;
+          };
+          // Prime Video draws its controls only for a real mouse move: a DevTools mouse move brought them, scripted
+          // pointer and mouse events did not (measured 2026-11-15). So the page asks the launcher for one, at the
+          // middle of the screen and a pixel to one side and then the other, so each one is a movement.
+          let wakeSide = 1;
+          const wake = () => {
+            const wv = window.chrome && window.chrome.webview;
+            if (!wv) return;
+            wakeSide = -wakeSide;
+            wv.postMessage({ tvPointer: 'wake', x: Math.round(innerWidth / 2) + wakeSide, y: Math.round(innerHeight / 2) });
+          };
+
           // A mouse pointer resting over the page does not mix with the arrows: as they scroll the page, the tiles
           // pass under it and the page reacts to it. Prime Video's hover cards took the focus from the tile the
           // arrows had reached, so the next press started again at the top, and made the rows grow (2026-11-15).
@@ -392,6 +500,8 @@ internal static class PageScripts
             if (location.pathname.includes('/play/') || document.fullscreenElement || layer) {
               try { keysMode(false); } catch (e) { console.warn('tv pointer', e); }
               nudge();
+              try { if (layer) wake(); } catch (e) { console.warn('tv player wake', e); }
+              try { if (layer && pickKey(layer, ev)) return; } catch (e) { console.warn('tv player buttons', e); }
               try { if (layer) intoPlayer(layer, ev); } catch (e) { console.warn('tv player focus', e); }
               return;
             }

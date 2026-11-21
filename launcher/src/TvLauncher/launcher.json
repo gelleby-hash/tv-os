@@ -63,9 +63,12 @@
       "Id": "prime",
       "Name": "Prime Video",
       "Url": "https://www.primevideo.com",
-      "BrowserArgs": "--enable-spatial-navigation",
+      "BrowserArgs": "--enable-spatial-navigation --autoplay-policy=no-user-gesture-required",
       "ArrowNav": true,
       "HideElements": "[data-testid=\"critical-notification\"]:has(a[href*=\"privacyprefs\"])",
+      "BoostGain": 4,
+      "NextButton": "Next Episode",
+      "PlayerEscape": true,
       "Icon": "icons/prime.svg"
     },
     {
