@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.IO;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
@@ -38,6 +40,7 @@ public partial class MainWindow : Window
 
     private readonly LauncherConfig _config;
     private readonly TimingLog _timing;
+    private MetNorwayClient? _metNorway;
     private readonly bool _dev;
     private readonly Stopwatch _sinceStart = Stopwatch.StartNew();
 
@@ -169,6 +172,11 @@ public partial class MainWindow : Window
             _bridge.WeatherOffChosen += () => RunLocation(() => location.ChooseOffAsync());
             _bridge.WindowsLocationChosen += () => RunLocation(() => location.ChooseWindowsAsync());
             _bridge.TurnOnRequested += OnTurnOnRequested;
+            _metNorway = new MetNorwayClient(
+                new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate },
+                Path.Combine(DataFolder, "metno-cache.json"),
+                TimeProvider.System);
+            _bridge.BackupRequested += place => _ = AnswerBackupAsync(place);
         }
         catch (Exception ex)
         {
@@ -701,6 +709,30 @@ public partial class MainWindow : Window
         _network ??= new NetworkWatcher(_networkSource = new WindowsNetworkSource(),
             message => Dispatcher.InvokeAsync(() => Post(message)), _timing);
         _network.PostCurrent();
+    }
+
+    // The fetch runs off the window's thread and the reply is posted from it. The log names the outcome, never the place.
+    private async Task AnswerBackupAsync(Coordinates place)
+    {
+        try
+        {
+            var result = await Task.Run(() => _metNorway!.GetAsync(place, CancellationToken.None));
+            _timing.Mark("weather backup: met norway " + result.Status);
+            if (result.Ok && result.RawJson is not null)
+            {
+                using var raw = JsonDocument.Parse(result.RawJson);
+                var reply = new { type = "weatherBackup", ok = true, raw = raw.RootElement.Clone(), fetchedAt = result.FetchedAtMs };
+                await Dispatcher.InvokeAsync(() => Post(reply));
+            }
+            else
+            {
+                await Dispatcher.InvokeAsync(() => Post(new { type = "weatherBackup", ok = false, status = result.Status }));
+            }
+        }
+        catch (Exception ex)
+        {
+            _timing.Mark("weather backup: failed: " + ex.Message);
+        }
     }
 
     private void Post(object message)

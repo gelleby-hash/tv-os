@@ -305,6 +305,7 @@ public sealed class LauncherConfig
         {
             locale = Locale,
             weatherRefreshMinutes = 15,
+            weatherBackup = true,
             apps = fromLayout.GetProperty("apps"),
             boostApps = fromLayout.GetProperty("boostApps"),
             defaults = new

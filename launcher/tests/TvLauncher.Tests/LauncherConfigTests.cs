@@ -58,6 +58,16 @@ public sealed class LauncherConfigTests : IDisposable
     }
 
     [Fact]
+    public void Page_config_says_weather_backup_is_on()
+    {
+        var cfg = LauncherConfig.Load(Write(ConfigJson()));
+
+        var page = ParsedScriptConfig(PageScript(cfg));
+
+        Assert.True(page.GetProperty("weatherBackup").GetBoolean());
+    }
+
+    [Fact]
     public void Defaults_BackKey166_RequireHdrTrue()
     {
         var cfg = LauncherConfig.Load(Write(ConfigJson()));

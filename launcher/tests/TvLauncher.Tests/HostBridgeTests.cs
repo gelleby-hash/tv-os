@@ -165,6 +165,19 @@ public sealed class HostBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task WeatherBackup_message_raises_BackupRequested_with_rounded_place()
+    {
+        var asked = new List<Coordinates>();
+        _bridge.BackupRequested += asked.Add;
+
+        await _bridge.HandleAsync("""{"type":"weatherBackup","latitude":55.953,"longitude":-3.188}""");
+        await _bridge.HandleAsync("""{"type":"weatherBackup","latitude":91,"longitude":0}""");
+
+        Assert.Equal([new Coordinates(55.95, -3.19)], asked);
+        Assert.DoesNotContain(LogLines(), l => l.Contains("55.9") || l.Contains("3.18"));
+    }
+
+    [Fact]
     public async Task LocationOff_RaisesWeatherOffChosen()
     {
         var chosen = 0;

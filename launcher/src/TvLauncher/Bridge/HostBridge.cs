@@ -22,6 +22,9 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
     /// <summary>The viewer picked a town in the page's search; the coordinates are already rounded.</summary>
     public event Action<Coordinates>? PlacePicked;
 
+    /// <summary>The page wants MET Norway's forecast for a place (the page cannot set the User-Agent it requires); already rounded.</summary>
+    public event Action<Coordinates>? BackupRequested;
+
     /// <summary>The viewer turned the weather off.</summary>
     public event Action? WeatherOffChosen;
 
@@ -78,6 +81,10 @@ public sealed class HostBridge(AppSwitcher switcher, IPowerActions power, Timing
                 case "locationPick" when place is not null:
                     timing.Mark("locationPick");
                     PlacePicked?.Invoke(place);
+                    break;
+                case "weatherBackup" when place is not null:
+                    timing.Mark("weatherBackup");
+                    BackupRequested?.Invoke(place);
                     break;
                 case "locationOff":
                     timing.Mark("locationOff");
