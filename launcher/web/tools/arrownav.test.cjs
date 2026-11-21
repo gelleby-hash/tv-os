@@ -10,8 +10,9 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'TvLauncher', 'Apps', 'PageScripts.cs'), 'utf8');
 const script = (() => {
-  const m = source.match(/ArrowNav = """\r?\n([\s\S]*?)\r?\n\s*""";/);
-  assert.ok(m, 'ArrowNav raw string found in PageScripts.cs');
+  const m = source.match(/ArrowNavScript = """\r?\n([\s\S]*?)\r?\n\s*""";/);
+  assert.ok(m, 'ArrowNavScript raw string found in PageScripts.cs');
+  assert.ok(m[1].includes('__AFTER_PLAYER__'), 'with the place for FocusAfterPlayer');
   return m[1];
 })();
 
@@ -64,9 +65,10 @@ class El {
     return (t === 'A' && ('href' in a || 'data-testid' in a)) || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(t)
       || ['button', 'tab', 'link'].includes(a.role) || ('tabindex' in a && String(a.tabindex) !== '-1');
   }
-  // The script's item selector, or 'video'.
+  // The script's item selector, 'video', or [attr="value"] (a FocusAfterPlayer selector).
   querySelectorAll(sel) {
-    const want = sel === 'video' ? (k) => k.tagName === 'VIDEO' : (k) => k.picked();
+    const attr = sel.match(/^\[([\w-]+)="([^"]*)"\]$/);
+    const want = sel === 'video' ? (k) => k.tagName === 'VIDEO' : attr ? (k) => k.attrs[attr[1]] === attr[2] : (k) => k.picked();
     const out = []; const walk = (e) => { for (const k of e.children) { if (want(k)) out.push(k); walk(k); } }; walk(this); return out;
   }
   // As in a browser, only an item, or an element with a tabindex (even -1), takes the focus.
@@ -141,7 +143,7 @@ function homePage({ pathname = '/en-gb/home', carousel = false } = {}) {
 
 // Prime Video's title page as measured on 2026-11-14 (1920 x 1080): a channel logo link stretched across the page, a
 // row of round buttons, Play, and the synopsis (a span with tabindex 0) to the right of Play and below it.
-function titlePage() {
+function titlePage({ afterPlayer = null } = {}) {
   const body = new El('body');
   const doc = { body, documentElement: new El('html'), activeElement: body, fullscreenElement: null, querySelectorAll: (s) => body.querySelectorAll(s),
     elementFromPoint: () => body };
@@ -149,7 +151,7 @@ function titlePage() {
   const logo = new El('a', { 'data-testid': 'channelLogo-link', 'aria-label': 'Logo' }, [72, 80, 1776, 35]);
   const trailer = new El('a', { href: '/trailer', 'aria-label': 'Watch trailer' }, [72, 684, 48, 48]);
   const like = new El('button', { 'aria-label': 'Like' }, [192, 684, 48, 48]);
-  const play = new El('a', { href: '/play', role: 'button', 'aria-label': 'Play' }, [72, 748, 348, 62]);
+  const play = new El('a', { href: '/play', role: 'button', 'aria-label': 'Play', 'data-testid': 'dp-atf-play-button' }, [72, 748, 348, 62]);
   const adFree = new El('a', { href: '/adfree', 'aria-label': 'Go ad free' }, [72, 824, 348, 62]);
   const synopsis = new El('span', { tabindex: 0, 'aria-label': 'Synopsis' }, [448, 815, 950, 75]);
   body.add(logo, trailer, like, play, adFree, synopsis);
@@ -159,8 +161,9 @@ function titlePage() {
   const video = new El('video', {}, [0, 0, 0, 0], { position: 'absolute' });
   const inside = new El('div', { tabindex: -1, 'aria-label': 'Rating' }, [0, 0, 0, 0]);
   body.add(layer.add(video, inside));
-  const p = run(doc, '/detail/0FKWLNTAYMFTSZ7TRZSPLG84NM', { logo, trailer, play, synopsis, layer, video, inside });
+  const p = run(doc, '/detail/0FKWLNTAYMFTSZ7TRZSPLG84NM', { logo, trailer, play, synopsis, layer, video, inside }, undefined, afterPlayer);
   p.showPlayer = () => { layer.style.display = 'block'; layer.rect = video.rect = [0, 0, 1920, 1080]; };
+  p.hidePlayer = () => { layer.style.display = 'none'; layer.rect = video.rect = [0, 0, 0, 0]; };
   return p;
 }
 
@@ -202,10 +205,12 @@ function primeHome({ shown = 'Pacers' } = {}) {
   return run(doc, '/region/eu/storefront', { sports, slides, top, low, seeMore }, [1280, 720]);
 }
 
-function run(doc, pathname, parts, [width, height] = [1920, 1080]) {
+// afterPlayer: the app's FocusAfterPlayer selector, put in the script as the launcher does (PageScripts.ArrowNav).
+function run(doc, pathname, parts, [width, height] = [1920, 1080], afterPlayer = null) {
   doc.head = new El('head');
   doc.documentElement.add(doc.head);
   doc.createElement = (tag) => new El(tag);
+  doc.querySelector = (s) => doc.body.querySelectorAll(s)[0] || null;
   const handlers = [];
   const warnings = [];
   const scrolls = [];
@@ -230,7 +235,7 @@ function run(doc, pathname, parts, [width, height] = [1920, 1080]) {
   });
   page = Object.assign({ document: doc, handlers, warnings, scrolls, clock: 0, tick: 1000, timers: [], posted: [] }, parts);
   page.runTimers = () => { const t = page.timers.splice(0); for (const fn of t) fn(); };
-  vm.runInContext(script, ctx, { filename: 'ArrowNav' });
+  vm.runInContext(script.replace('__AFTER_PLAYER__', JSON.stringify(afterPlayer)), ctx, { filename: 'ArrowNav' });
   return page;
 }
 
@@ -866,8 +871,8 @@ test('arrows: the menu key on an item with no hover card leaves things as they w
 // fixed over the title page, its controls drawn only after pointer activity (none in the page while idle), a top bar,
 // a bottom row (skip back, pause, skip forward), Next Episode at the bottom right and the Next Up card's Hide above
 // it. In the player Prime takes Left and Right to seek and Up and Down for its own volume, so no key reached a button.
-function playerPage() {
-  const p = titlePage();
+function playerPage(opts) {
+  const p = titlePage(opts);
   p.showPlayer();
   const controls = new El('div', {}, [0, 0, 1920, 1080], { display: 'none' });
   const b = (label, rect) => new El('button', { 'aria-label': label }, rect);
@@ -950,6 +955,129 @@ test("player: while nothing is picked, Left, Right and OK are the player's; once
   const ev = press(p, 'ArrowRight');
   assert.equal(ev.prevented || ev.stopped, false, 'the controls faded: Right seeks');
   assert.equal(p.pause.clicks, undefined);
+});
+
+// Back from Prime's player (the launcher's Escape, PlayerEscape) left the focus on the page's body, so the next arrow
+// started again at the top of the title page (measured 2026-11-21); the owner wants it on the Resume button.
+const RESUME = '[data-testid="dp-atf-play-button"]';
+const closedByBack = (p, { blurred = true } = {}) => {
+  const ev = press(p, 'Escape');
+  p.hidePlayer();
+  // Chromium moves the focus off an element that is no longer shown; the first check may come before it does.
+  if (blurred) p.document.activeElement = p.document.body;
+  p.runTimers();
+  return ev;
+};
+
+test('after the player: Back that closes the player layer puts the focus on the page button FocusAfterPlayer names', () => {
+  for (const blurred of [true, false]) {
+    const p = titlePage({ afterPlayer: RESUME });
+    p.showPlayer();
+    p.inside.focus();
+    const ev = closedByBack(p, { blurred });
+    assert.equal(ev.prevented || ev.stopped, false, 'Escape still goes to the player, which closes');
+    assert.equal(focused(p), 'Play', blurred ? 'from the body' : 'from the hidden player');
+    assert.equal(p.play.focusOpts.preventScroll, true);
+    assert.equal(p.play.scrolled, null, 'on screen already: the page stays where it is');
+  }
+});
+
+// Started from an episode card further down, the page was left scrolled there; scrolled only as far as showed it,
+// Resume ended at the top edge of the screen, under Prime's fixed menu bar (measured 2026-11-21).
+test('after the player: a button off the screen, or at its very edge, is scrolled to the middle as the arrows do', () => {
+  for (const top of [-600, 1, 1500]) {
+    const p = titlePage({ afterPlayer: RESUME });
+    p.play.rect = [72, top, 348, 62];
+    p.showPlayer();
+    p.inside.focus();
+    closedByBack(p);
+    assert.equal(focused(p), 'Play', 'top ' + top);
+    assert.equal(p.play.scrolled.block, 'center', 'top ' + top);
+  }
+});
+
+// Prime redraws its title page after the player closes and drops the focus to the body again, about 100 ms after the
+// script had put it on Resume (measured 2026-11-21: Resume at 281 ms, BODY at 361 ms after Escape).
+test('after the player: a focus the page drops again within the next second or so is put back', () => {
+  const p = titlePage({ afterPlayer: RESUME });
+  p.showPlayer();
+  p.inside.focus();
+  closedByBack(p);
+  assert.equal(focused(p), 'Play');
+  p.document.activeElement = p.document.body;
+  p.runTimers();
+  assert.equal(focused(p), 'Play', 'put back');
+  for (let i = 0; i < 5; i++) p.runTimers();
+  assert.equal(p.timers.length, 0, 'and then it stops looking');
+});
+
+test('after the player: once the viewer moves on from it, it is left alone', () => {
+  const p = titlePage({ afterPlayer: RESUME });
+  p.showPlayer();
+  p.inside.focus();
+  closedByBack(p);
+  press(p, 'ArrowDown');
+  const moved = focused(p);
+  assert.notEqual(moved, 'Play');
+  p.runTimers();
+  assert.equal(focused(p), moved);
+  assert.equal(p.timers.length, 0);
+});
+
+test('after the player: OK on a picked button that closes the player (Close player) does the same', () => {
+  const p = playerPage({ afterPlayer: RESUME });
+  p.showControls();
+  p.close.focus();
+  press(p, 'Enter');
+  assert.equal(p.close.clicks, 1);
+  p.hidePlayer();
+  p.document.activeElement = p.document.body;
+  p.runTimers();
+  assert.equal(focused(p), 'Play');
+});
+
+test('after the player: without FocusAfterPlayer the focus is left as the page leaves it', () => {
+  const p = titlePage();
+  p.showPlayer();
+  p.inside.focus();
+  closedByBack(p);
+  assert.equal(p.document.activeElement, p.document.body);
+  assert.equal(p.timers.length, 0);
+});
+
+test('after the player: a player layer still open after Escape is waited for a moment, then left alone', () => {
+  const p = titlePage({ afterPlayer: RESUME });
+  p.showPlayer();
+  p.inside.focus();
+  press(p, 'Escape');
+  for (let i = 0; i < 5; i++) p.runTimers();
+  assert.equal(p.timers.length, 0, 'it stops asking');
+  assert.equal(focused(p), 'Rating');
+  p.hidePlayer();
+  p.runTimers();
+  assert.equal(focused(p), 'Rating', 'a player closed much later is not its doing');
+});
+
+test('after the player: a focus the page or the viewer already put on an item is kept', () => {
+  const p = titlePage({ afterPlayer: RESUME });
+  p.showPlayer();
+  p.inside.focus();
+  press(p, 'Escape');
+  p.hidePlayer();
+  p.trailer.focus();
+  p.runTimers();
+  assert.equal(focused(p), 'Watch trailer');
+});
+
+test('after the player: a selector that matches nothing, or that the browser refuses, changes nothing and never throws', () => {
+  for (const sel of ['[data-testid="gone"]', 'a[[']) {
+    const p = titlePage({ afterPlayer: sel });
+    p.document.querySelector = (s) => { if (s === 'a[[') throw new Error('SyntaxError'); return p.document.body.querySelectorAll(s)[0] || null; };
+    p.showPlayer();
+    p.inside.focus();
+    closedByBack(p);
+    assert.equal(p.document.activeElement, p.document.body, sel);
+  }
 });
 
 test('player: a player page of its own (/play/) keeps Up and Down', () => {

@@ -201,8 +201,9 @@ internal static class PageScripts
     // row five tiles per press, and Chromium's spatial navigation stops on empty divs between tiles and scrolls the
     // page (both measured 2026-10-30); neither sees a key this takes. The player keeps its own keys (each also nudges
     // a pointer so its controls show), and so does a text box for Left and Right.
-    public const string ArrowNav = """
+    private const string ArrowNavScript = """
         (() => {
+          const AFTER_PLAYER = __AFTER_PLAYER__;
           const DIRS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
           const PICK = 'a[href], a[data-testid], button, input, select, textarea, [role="button"], [role="tab"], [role="link"], [tabindex]:not([tabindex="-1"])';
           const deep = () => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a; };
@@ -404,7 +405,7 @@ internal static class PageScripts
             if (!picked && (!d || d[1] === 0)) return false;
             ev.preventDefault();
             ev.stopImmediatePropagation();
-            if (picked && !d) { cur.click(); return true; }
+            if (picked && !d) { cur.click(); afterPlayer(layer); return true; }
             if (picked) {
               const to = next(cur, d, layer);
               if (to) { to.focus({ preventScroll: true }); mark(to); }
@@ -418,6 +419,35 @@ internal static class PageScripts
             }, waits[0]);
             if (!pick()) later([250, 350]);
             return true;
+          };
+
+          // Once the player layer closes (Back, or its own Close player picked with OK), the focus goes to the page
+          // button FocusAfterPlayer names. Prime Video left it on the page's body, so the next arrow started again at
+          // the top of the title page (2026-11-21); the owner wants its Resume button. Only while nothing on the page
+          // has the focus, and only for a layer that closes within about a second. Prime then redraws the page and
+          // drops the focus to the body again (Resume 281 ms, BODY 361 ms after Back), so it looks again until about
+          // 1.4 s, and stops once anything else has the focus (the viewer moved on).
+          const afterPlayer = (layer) => {
+            if (!AFTER_PLAYER) return;
+            const later = (waits) => setTimeout(() => {
+              try {
+                const more = () => { if (waits.length > 1) later(waits.slice(1)); };
+                if (playerLayer()) { more(); return; }
+                const cur = deep(), to = document.querySelector(AFTER_PLAYER);
+                if (cur && cur === to) { more(); return; }
+                if (cur && cur !== document.body && cur !== document.documentElement && !layer.contains(cur)) return;
+                if (!to || !usable(to)) return;
+                to.focus({ preventScroll: true });
+                const r = face(to).getBoundingClientRect();
+                placed = { e: to, y: r.top + scrollY };
+                // Well on screen it stays put; else to the middle, as the arrows do: scrolled only as far as showed it,
+                // Resume ended under Prime's fixed menu bar (back from an episode further down, 2026-11-21).
+                if (r.top < innerHeight * 0.1 || r.bottom > innerHeight * 0.9)
+                  face(to).scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+                more();
+              } catch (e) { console.warn('tv after player', e); }
+            }, waits[0]);
+            later([150, 250, 400, 600]);
           };
           // Prime Video draws its controls only for a real mouse move: a DevTools mouse move brought them, scripted
           // pointer and mouse events did not (measured 2026-11-15). So the page asks the launcher for one, at the
@@ -501,6 +531,7 @@ internal static class PageScripts
               try { keysMode(false); } catch (e) { console.warn('tv pointer', e); }
               nudge();
               try { if (layer) wake(); } catch (e) { console.warn('tv player wake', e); }
+              if (layer && ev.key === 'Escape') afterPlayer(layer);
               try { if (layer && pickKey(layer, ev)) return; } catch (e) { console.warn('tv player buttons', e); }
               try { if (layer) intoPlayer(layer, ev); } catch (e) { console.warn('tv player focus', e); }
               return;
@@ -555,6 +586,13 @@ internal static class PageScripts
           }, true);
         })();
         """;
+
+    /// <summary>
+    /// The arrows' script. FocusAfterPlayer (a CSS selector, or null) names the page button that takes the focus once
+    /// the player layer closes; it goes in as a JSON string, so no selector can end the script.
+    /// </summary>
+    public static string ArrowNav(string? focusAfterPlayer) =>
+        ArrowNavScript.Replace("__AFTER_PLAYER__", focusAfterPlayer is null ? "null" : JsonSerializer.Serialize(focusAfterPlayer));
 
     // Runs in every YouTube page with PhoneMic, before the page's own scripts, and hands YouTube's voice search the
     // phone's sound in place of a microphone. Measured in a spike on 2026-10-31:

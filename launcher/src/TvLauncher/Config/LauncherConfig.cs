@@ -38,7 +38,8 @@ public sealed record AppEntry(
     string? ExitWhenEmpty = null,
     string? HideElements = null,
     string? NextButton = null,
-    bool PlayerEscape = false);
+    bool PlayerEscape = false,
+    string? FocusAfterPlayer = null);
 
 /// <summary>An app the family picks on the home row, with one or more versions; the first is the default.</summary>
 public sealed record AppDefinition(string Id, string Name, string? Icon, IReadOnlyList<AppEntry> Versions)
@@ -271,7 +272,8 @@ public sealed class LauncherConfig
             string.IsNullOrWhiteSpace(a.ExitWhenEmpty) ? null : a.ExitWhenEmpty.Trim(),
             string.IsNullOrWhiteSpace(a.HideElements) ? null : a.HideElements.Trim(),
             string.IsNullOrWhiteSpace(a.NextButton) ? null : a.NextButton.Trim(),
-            a.PlayerEscape ?? false);
+            a.PlayerEscape ?? false,
+            string.IsNullOrWhiteSpace(a.FocusAfterPlayer) ? null : a.FocusAfterPlayer.Trim());
     }
 
     // Missing means no configured place: the viewer's choice or Windows location decides (LocationResolver).
@@ -385,6 +387,9 @@ public sealed class LauncherConfig
         // Back in a player layer over the page presses Escape, which closes it, instead of going back in history
         // (Prime Video: its player has no history entry, so Back left the season picked, 2026-11-15).
         public bool? PlayerEscape { get; set; }
+        // A CSS selector: the page button that takes the focus once the player layer closes, with ArrowNav (Prime Video:
+        // its Resume button, where Back from the player left the focus on nothing, 2026-11-21).
+        public string? FocusAfterPlayer { get; set; }
         // The versions of this app, each read with the rules of an app's own fields (a Url and the rest).
         public List<RawApp?>? Versions { get; set; }
 

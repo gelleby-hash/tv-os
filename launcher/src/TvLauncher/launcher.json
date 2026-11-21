@@ -69,6 +69,7 @@
       "BoostGain": 4,
       "NextButton": "Next Episode",
       "PlayerEscape": true,
+      "FocusAfterPlayer": "[data-testid=\"dp-atf-play-button\"]",
       "Icon": "icons/prime.svg"
     },
     {

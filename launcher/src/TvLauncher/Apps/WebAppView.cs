@@ -130,7 +130,7 @@ public sealed class WebAppView : IAppView
         if (_entry.ExitWhenEmpty is { } root)
             await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.ExitWhenEmpty(root));
         if (_entry.ArrowNav)
-            await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.ArrowNav);
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.ArrowNav(_entry.FocusAfterPlayer));
         if (_entry.PhoneMic)
             await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.PhoneMic);
         // ArrowNav asks for a real mouse move in a player that shows its controls only for one.

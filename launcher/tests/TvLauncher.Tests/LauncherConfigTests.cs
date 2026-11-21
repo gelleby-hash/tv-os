@@ -830,6 +830,26 @@ public sealed class LauncherConfigTests : IDisposable
     }
 
     [Fact]
+    public void FocusAfterPlayer_MissingOrBlankIsNull_ASelectorIsReadTrimmed()
+    {
+        Assert.Null(LauncherConfig.Load(Write(OneApp(GoodFields))).Apps.Single().Default.FocusAfterPlayer);
+        Assert.Null(LauncherConfig.Load(Write(OneApp(GoodFields + ", \"FocusAfterPlayer\": \"  \""))).Apps.Single().Default.FocusAfterPlayer);
+        Assert.Equal("[data-testid=\"x\"]",
+            LauncherConfig.Load(Write(OneApp(GoodFields + ", \"FocusAfterPlayer\": \" [data-testid=\\\"x\\\"] \""))).Apps.Single().Default.FocusAfterPlayer);
+    }
+
+    [Fact]
+    public void Load_ShippedDefault_PrimeFocusesItsResumeButtonAfterThePlayer_NoOtherAppDoes()
+    {
+        // Back from Prime's player left the focus on the page's body (2026-11-21); the owner wants it on Resume, the
+        // title page's main play button (measured: a[data-testid="dp-atf-play-button"], "Resume S1 E2").
+        var apps = LauncherConfig.Load(RepoConfigPath).Apps;
+        Assert.Equal("[data-testid=\"dp-atf-play-button\"]", apps.Single(a => a.Id == "prime").Default.FocusAfterPlayer);
+        foreach (var other in apps.Where(a => a.Id != "prime").SelectMany(a => a.Versions))
+            Assert.Null(other.FocusAfterPlayer);
+    }
+
+    [Fact]
     public void Load_ShippedDefault_PrimeClosesItsPlayerWithEscape_AndHasANextEpisodeButton()
     {
         // Back from Prime's player went back in history, to season 1 (2026-11-15); its button is "Next Episode".

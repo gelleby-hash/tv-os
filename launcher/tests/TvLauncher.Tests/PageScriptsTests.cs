@@ -49,7 +49,7 @@ public sealed class PageScriptsTests
     [Fact]
     public void ArrowNav_TakesTheArrowsFirstAndLeavesThePlayerAlone()
     {
-        var script = PageScripts.ArrowNav;
+        var script = PageScripts.ArrowNav(null);
 
         // Its own listener runs first (capture, added before the page's scripts) and the page never sees the key.
         Assert.Contains("window.addEventListener('keydown'", script);
@@ -64,6 +64,16 @@ public sealed class PageScriptsTests
         Assert.DoesNotContain("play(", script);
         Assert.DoesNotContain("currentTime", script);
         Assert.DoesNotContain("muted", script);
+    }
+
+    [Fact]
+    public void ArrowNav_FocusAfterPlayer_GoesInAsAJsonString_OrNull()
+    {
+        // arrownav.test.cjs runs what the script does with it.
+        Assert.Contains("const AFTER_PLAYER = null;", PageScripts.ArrowNav(null));
+        var script = PageScripts.ArrowNav("[data-testid=\"x\"] </script>");
+        Assert.Contains("const AFTER_PLAYER = \"[data-testid=\\u0022x\\u0022] \\u003C/script\\u003E\";", script);
+        Assert.DoesNotContain("__AFTER_PLAYER__", script);
     }
 
     [Fact]
