@@ -39,8 +39,8 @@
     var h = d.getHours() % 12 || 12;
     return h + (d.getHours() < 12 ? ' AM' : ' PM');
   }
-  function temp(c) { return Math.round(settings.unit === 'F' ? c * 9 / 5 + 32 : c) + '°'; }
-  function wind(k) { return settings.unit === 'F' ? Math.round(k * 0.621) + ' mph' : Math.round(k) + ' km/h'; }
+  function temp(c) { return c == null ? '-' : Math.round(settings.unit === 'F' ? c * 9 / 5 + 32 : c) + '°'; }
+  function wind(k) { return k == null ? '-' : settings.unit === 'F' ? Math.round(k * 0.621) + ' mph' : Math.round(k) + ' km/h'; }
   function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
   var dateFmt = new Intl.DateTimeFormat(settings.language, { weekday: 'long', day: 'numeric', month: 'long' });
   var dayFmt = new Intl.DateTimeFormat(settings.language, { weekday: 'short' });
@@ -87,7 +87,7 @@
 
     var sub = FALLBACK[p] ? tr(FALLBACK[p]) : '';
     if (weather) {
-      var d = W.describe(weather.current.code), dayish = p === 'morning' || p === 'afternoon';
+      var d = W.describe(W.nowFor(weather, Date.now()).code), dayish = p === 'morning' || p === 'afternoon';
       sub = tr(MOOD[d.kind][dayish ? 0 : 1]);
     }
     $('sub').textContent = sub;
@@ -147,7 +147,7 @@
       $('fcStars').setAttribute('hidden', '');
       return;
     }
-    var c = weather.current, d = W.describe(c.code), t = today(now) || weather.daily[0];
+    var c = W.nowFor(weather, Date.now()), d = W.describe(c.code), t = today(now) || weather.daily[0];
     applyLook(d.kind, c);
     $('wxIcon').innerHTML = I.weather(d.kind, c.isDay);
     $('wxTemp').textContent = temp(c.temp);
@@ -155,7 +155,7 @@
     $('wxHilo').textContent = t ? tr('H {high}   L {low}', { high: temp(t.max), low: temp(t.min) }) : '';
     var stale = Date.now() - weather.fetchedAt > 60 * 60e3;
     $('wxDetails').innerHTML = tr('Feels') + ' ' + temp(c.feels) + '<i></i>' + tr('Wind') + ' ' + wind(c.wind) + '<i></i>' + tr('Humidity') + ' ' +
-      Math.round(c.humidity) + '%' + (stale ? '<i></i>' + tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '');
+      (c.humidity == null ? '-' : Math.round(c.humidity) + '%') + (stale ? '<i></i>' + tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '');
     var hours = weather.hourly.filter(function (h) { return h.time > now; }).slice(0, 6);
     $('wxHours').innerHTML = hours.map(function (h) {
       var hd = W.describe(h.code);
@@ -165,7 +165,7 @@
   }
 
   function renderSky(now) {
-    var ph = phase(now), cur = weather ? weather.current : null;
+    var ph = phase(now), cur = weather ? W.nowFor(weather, Date.now()) : null;
     var d = cur ? W.describe(cur.code) : { kind: 'clear', intensity: 0 };
     var cloud = cur ? cur.cloud : 0.1;
     var key = [ph, Math.round(cloud * 10), d.kind, now.getDate()].join('|');
@@ -339,7 +339,7 @@
   function row(label, value) { return '<div><span>' + tr(label) + '</span><b>' + value + '</b></div>'; }
 
   function forecastTiles(now) {
-    var days = weather.daily, c = weather.current, t = today(now) || days[0], next = days[days.indexOf(t) + 1];
+    var days = weather.daily, c = W.nowFor(weather, Date.now()), t = today(now) || days[0], next = days[days.indexOf(t) + 1];
     var uv = c.uv == null ? DASH : Math.round(c.uv);
     var peak = t.uvMax == null ? DASH : tr('Peak today {n}, {category}', { n: Math.round(t.uvMax), category: tr(W.uvCategory(t.uvMax)) });
     var mark = c.uv == null ? '' : '<i class="uvmark" style="left:' + pos(percent(c.uv, 11)) + '%"></i>';
@@ -388,7 +388,7 @@
     $('ambTime').textContent = fmtTime(now);
     $('ambDate').textContent = dateFmt.format(now);
     if (weather && !weatherIsOff()) {
-      var c = weather.current, d = W.describe(c.code);
+      var c = W.nowFor(weather, Date.now()), d = W.describe(c.code);
       $('ambWx').innerHTML = I.weather(d.kind, c.isDay) + '<span>' + temp(c.temp) + '</span><em>' + esc(d.label) + '</em>';
     } else $('ambWx').innerHTML = '';
   }

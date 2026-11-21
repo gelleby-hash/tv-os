@@ -2,7 +2,9 @@
 (function () {
   'use strict';
 
-  var CACHE_KEY = 'tvhome.weather.v2';
+  var CACHE_KEY = 'tvhome.weather.v3';
+  // The key before the hourly feels-like, wind and humidity were saved; still read, so an old forecast shows after an update.
+  var OLD_CACHE_KEYS = ['tvhome.weather.v2'];
 
   // WMO weather interpretation codes.
   var CODES = {
@@ -63,7 +65,7 @@
   function url(loc) {
     return 'https://api.open-meteo.com/v1/forecast?latitude=' + loc.latitude + '&longitude=' + loc.longitude +
       '&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,cloud_cover,wind_direction_10m,wind_gusts_10m,dew_point_2m,uv_index,visibility' +
-      '&hourly=temperature_2m,weather_code,precipitation_probability,is_day' +
+      '&hourly=temperature_2m,weather_code,precipitation_probability,is_day,apparent_temperature,wind_speed_10m,relative_humidity_2m' +
       '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,uv_index_max,precipitation_sum' +
       '&timezone=auto&forecast_days=7';
   }
@@ -97,7 +99,8 @@
       var t = localDate(h.time[i]);
       if (t.getTime() + 3600e3 <= now) continue;
       hourly.push({ time: t, temp: h.temperature_2m[i], code: h.weather_code[i],
-        pop: h.precipitation_probability[i], isDay: h.is_day[i] === 1 });
+        pop: h.precipitation_probability[i], isDay: h.is_day[i] === 1,
+        feels: at(h.apparent_temperature, i), wind: at(h.wind_speed_10m, i), humidity: at(h.relative_humidity_2m, i) });
       if (hourly.length >= 24) break;
     }
     for (var j = 0; j < d.time.length; j++) {
@@ -116,6 +119,23 @@
     };
   }
 
+  // What the weather is now, from a saved forecast. Within an hour of the fetch that is the fetched "now" reading. After
+  // that it is the saved hour that contains nowMs (the last saved hour once they have run out), its values over the old
+  // reading's; a value that hour lacks is null, not the old reading's. UV, visibility and the rest stay as fetched.
+  function nowFor(w, nowMs) {
+    if (nowMs - w.fetchedAt <= 3600e3 || !w.hourly || !w.hourly.length) return w.current;
+    var h = w.hourly[w.hourly.length - 1];
+    for (var i = 0; i < w.hourly.length; i++) {
+      var start = w.hourly[i].time.getTime();
+      if (nowMs >= start && nowMs < start + 3600e3) { h = w.hourly[i]; break; }
+    }
+    var out = {};
+    for (var k in w.current) out[k] = w.current[k];
+    out.temp = num(h.temp); out.code = h.code; out.isDay = h.isDay;
+    out.feels = num(h.feels); out.wind = num(h.wind); out.humidity = num(h.humidity);
+    return out;
+  }
+
   // Coordinates are used to 2 decimals (about a kilometre) everywhere: the request, the cache and the comparison.
   function rounded(loc) {
     return { latitude: Math.round(loc.latitude * 100) / 100, longitude: Math.round(loc.longitude * 100) / 100 };
@@ -125,7 +145,9 @@
   function readCache(loc) {
     if (!loc) return null;
     try {
-      var c = JSON.parse(localStorage.getItem(CACHE_KEY)), want = rounded(loc);
+      var saved = localStorage.getItem(CACHE_KEY);
+      for (var k = 0; saved == null && k < OLD_CACHE_KEYS.length; k++) saved = localStorage.getItem(OLD_CACHE_KEYS[k]);
+      var c = JSON.parse(saved), want = rounded(loc);
       if (!c || !c.raw || !c.loc || c.loc.latitude !== want.latitude || c.loc.longitude !== want.longitude) return null;
       return normalize(c.raw, c.fetchedAt);
     } catch (e) { return null; }
@@ -145,5 +167,5 @@
     }).finally(function () { if (timer) clearTimeout(timer); });
   }
 
-  window.TVWeather = { describe: describe, look: look, looks: LOOKS, compassName: compassName, uvCategory: uvCategory, stars: stars, fetch: fetchWeather, cached: readCache, rounded: rounded };
+  window.TVWeather = { describe: describe, look: look, looks: LOOKS, compassName: compassName, uvCategory: uvCategory, stars: stars, fetch: fetchWeather, cached: readCache, rounded: rounded, nowFor: nowFor };
 })();

@@ -9,7 +9,7 @@ const { loadPage, fakeConfig, placeMessage, root } = require('./fake-page.cjs');
 
 // A clear morning: 9:00 on 2 November 2026, by the page's own clock.
 const NOW = new Date(2026, 10, 2, 9, 0, 0).getTime();
-const CACHE_KEY = 'tvhome.weather.v2';
+const CACHE_KEY = 'tvhome.weather.v3';
 
 // A raw Open-Meteo answer for that morning: clear sky, in daylight, seven days with sunrise at 07:00 and sunset at 17:00.
 function rawClear(temperature = 12) {
@@ -993,3 +993,44 @@ test('locationTurnOn off while the pop-up is already open (the automatic one) ad
   assert.equal(page.focused(), turnOnButton(page));
 });
 
+
+// A saved forecast fetched 6 hours before NOW, read while the network is down: the hour's own values, not the old "now".
+const DOWN = () => Promise.reject(new Error('offline'));
+function sixHoursOld(key) {
+  const raw = rawClear(12);
+  raw.current.temperature_2m = 20;
+  raw.current.apparent_temperature = 18;
+  raw.current.relative_humidity_2m = 55;
+  raw.current.wind_speed_10m = 30;
+  const n = raw.hourly.time.length;
+  raw.hourly.temperature_2m = raw.hourly.temperature_2m.map(() => 7);
+  raw.hourly.apparent_temperature = Array(n).fill(5);
+  raw.hourly.wind_speed_10m = Array(n).fill(14);
+  raw.hourly.relative_humidity_2m = Array(n).fill(88);
+  return { [key]: JSON.stringify({ raw, fetchedAt: NOW - 6 * 3600e3, loc: { latitude: 10, longitude: 20 } }) };
+}
+
+test('the card on a 6 hour old forecast shows the current hour and still says Updated HH:MM', async () => {
+  const page = await pageWith({ storage: sixHoursOld(CACHE_KEY), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '7\u00b0');
+  const details = page.$('wxDetails').innerHTML;
+  assert.ok(details.includes('Feels 5\u00b0') && details.includes('14 km/h') && details.includes('88%'), details);
+  assert.ok(/Updated 03:00/.test(details), details);
+});
+
+test('a v2 cache entry is still shown, with hyphens for what it lacks', async () => {
+  const seeded = sixHoursOld('tvhome.weather.v2');
+  const saved = JSON.parse(seeded['tvhome.weather.v2']);
+  saved.fetchedAt = NOW - 3 * 3600e3;
+  for (const k of ['apparent_temperature', 'wind_speed_10m', 'relative_humidity_2m']) delete saved.raw.hourly[k];
+  seeded['tvhome.weather.v2'] = JSON.stringify(saved);
+  const page = await pageWith({ storage: seeded, fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '7\u00b0');
+  const details = page.$('wxDetails').innerHTML;
+  assert.ok(details.includes('Feels -'), details);
+  assert.ok(details.includes('Humidity -'), details);
+});
