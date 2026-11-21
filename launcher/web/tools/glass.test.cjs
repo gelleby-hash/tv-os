@@ -196,3 +196,26 @@ test('every region rect is clamped to the picture, so no value is NaN', () => {
   SEVEN.forEach(n => assert.ok(Number.isFinite(Number(page.document.documentElement.style[n])), n));
   assert.deepEqual(seen, [[0, 0, 1920, 1080]]);   // the whole picture is read once
 });
+
+// The 90th percentile is read from a histogram rather than a full sort; it must stay what the sort gave.
+test('levelOf matches a sort-based level within 0.002 on varied pixels', () => {
+  const G = loadGlass();
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  // Mostly dark with a bright band on the right, so the 90th percentile and the mean differ a lot.
+  const pixels = picture(400, 200, x => (x > 300 ? [200 + rnd() * 55, 190 + rnd() * 65, rnd() * 255] : [rnd() * 90, rnd() * 80, rnd() * 255]));
+  const rect = { l: 10, t: 5, r: 390, b: 195 };
+  const lumas = [];
+  let sum = 0;
+  for (let y = rect.t; y < rect.b; y++) {
+    for (let x = rect.l; x < rect.r; x += 4) {
+      const i = (y * pixels.width + x) * 4, d = pixels.data;
+      const l = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+      lumas.push(l);
+      sum += l;
+    }
+  }
+  lumas.sort((a, b) => a - b);
+  const expected = 0.6 * (sum / lumas.length) + 0.4 * lumas[Math.min(lumas.length - 1, Math.floor(0.9 * lumas.length))];
+  near(G.levelOf(pixels, rect), expected, 0.002);
+});

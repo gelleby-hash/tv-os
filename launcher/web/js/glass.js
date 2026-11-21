@@ -23,21 +23,26 @@
   // Brightness 0 to 1 of the photo inside rect {l, t, r, b} (right and bottom excluded), from
   // pixels {data, width} (RGBA bytes, as ImageData). Every 4th pixel of each row is read. The mean
   // alone would hide a small bright patch that still washes out the text, so the 90th percentile counts too.
+  // The percentile comes from a histogram of BINS steps (within half a step of the exact value) rather than a sort
+  // of every sample, which held the page's thread for a noticeable time on each photo change.
+  var BINS = 1024;
   function levelOf(pixels, rect) {
     var data = pixels.data, width = pixels.width;
-    var lumas = [], sum = 0;
+    var counts = new Array(BINS).fill(0), n = 0, sum = 0;
     for (var y = rect.t; y < rect.b; y++) {
       for (var x = rect.l; x < rect.r; x += 4) {
         var i = (y * width + x) * 4;
         var l = (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
-        lumas.push(l);
+        counts[Math.min(BINS - 1, Math.floor(l * BINS))]++;
+        n++;
         sum += l;
       }
     }
-    if (!lumas.length) return 0;
-    lumas.sort(function (a, b) { return a - b; });
-    var p90 = lumas[Math.min(lumas.length - 1, Math.floor(0.9 * lumas.length))];
-    return 0.6 * (sum / lumas.length) + 0.4 * p90;
+    if (!n) return 0;
+    // The sample at sorted position floor(0.9 n), as the sort read it, lies in the first bin whose running count passes it.
+    var target = Math.min(n - 1, Math.floor(0.9 * n)), seen = 0, bin = 0;
+    while (seen + counts[bin] <= target) seen += counts[bin++];
+    return 0.6 * (sum / n) + 0.4 * ((bin + 0.5) / BINS);
   }
 
   // levels: {greet, wx, sub, tiles, top}, each 0 to 1. Returns {propertyName: number}.
