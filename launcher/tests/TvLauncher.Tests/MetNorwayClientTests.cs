@@ -29,12 +29,24 @@ public sealed class MetNorwayClientTests : IDisposable
         }
     }
 
+    // A box whose wall clock is a chosen moment (it can disagree with the server's) and moves with the manual clock.
+    private sealed class BoxClock(ManualTime inner, DateTimeOffset start) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => start + inner.Elapsed;
+        public override long GetTimestamp() => inner.GetTimestamp();
+        public override long TimestampFrequency => inner.TimestampFrequency;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            inner.CreateTimer(callback, state, dueTime, period);
+    }
+
     private sealed class HangingHandler : HttpMessageHandler
     {
+        public int Requests;
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            Interlocked.Increment(ref Requests);
             Started.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct);
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -90,11 +102,13 @@ public sealed class MetNorwayClientTests : IDisposable
     public async Task After_Expires_sends_If_Modified_Since_and_304_keeps_the_answer()
     {
         var calls = 0;
+        var time = new ManualTime();
         var handler = new FakeHandler(_ => Task.FromResult(++calls == 1
-            ? Ok(DateTimeOffset.UtcNow.AddMilliseconds(-1), "Sat, 21 Nov 2026 10:00:00 GMT")
+            ? OkWithDate(BoxNow, BoxNow.AddMinutes(10).ToString("R"))
             : new HttpResponseMessage(HttpStatusCode.NotModified)));
-        var client = new MetNorwayClient(handler, CachePath, TimeProvider.System);
+        var client = new MetNorwayClient(handler, CachePath, new BoxClock(time, BoxNow));
         var first = await client.GetAsync(Place, CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(11));
 
         var second = await client.GetAsync(Place, CancellationToken.None);
 
@@ -260,5 +274,96 @@ public sealed class MetNorwayClientTests : IDisposable
         time.Advance(TimeSpan.FromHours(0.2));
         await client.GetAsync(Place, CancellationToken.None);
         Assert.Equal(2, handler.Requests.Count);
+    }
+
+    private static readonly DateTimeOffset BoxNow = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+
+    private static HttpResponseMessage OkWithDate(DateTimeOffset date, string? expires)
+    {
+        var response = Ok(null);
+        response.Headers.Date = date;
+        if (expires is not null)
+            response.Content.Headers.TryAddWithoutValidation("Expires", expires);
+        return response;
+    }
+
+    [Fact]
+    public async Task Expires_is_measured_against_the_servers_Date_when_the_box_clock_is_ahead()
+    {
+        var time = new ManualTime();
+        var serverNow = BoxNow.AddHours(-2);
+        var handler = new FakeHandler(_ => Task.FromResult(OkWithDate(serverNow, serverNow.AddMinutes(30).ToString("R"))));
+        var client = new MetNorwayClient(handler, CachePath, new BoxClock(time, BoxNow));
+        await client.GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromMinutes(29));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromMinutes(2));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task An_unparsable_Expires_is_kept_for_an_hour()
+    {
+        var time = new ManualTime();
+        var handler = new FakeHandler(_ => Task.FromResult(OkWithDate(BoxNow, "0")));
+        var client = new MetNorwayClient(handler, CachePath, new BoxClock(time, BoxNow));
+        await client.GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromMinutes(59));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromMinutes(2));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_304_renews_by_the_same_rule()
+    {
+        var time = new ManualTime();
+        var calls = 0;
+        var handler = new FakeHandler(_ => Task.FromResult(++calls switch
+        {
+            1 => OkWithDate(BoxNow, BoxNow.AddMinutes(30).ToString("R")),
+            2 => new HttpResponseMessage(HttpStatusCode.NotModified) { Content = new StringContent("") },
+            _ => OkWithDate(BoxNow, null),
+        }));
+        var client = new MetNorwayClient(handler, CachePath, new BoxClock(time, BoxNow));
+        await client.GetAsync(Place, CancellationToken.None);
+        time.Advance(TimeSpan.FromMinutes(31));
+        var renewed = await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal("304", renewed.Status);
+
+        // The 304 carried no usable Expires, so the answer is kept for the default hour from the renewal.
+        time.Advance(TimeSpan.FromMinutes(59));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
+
+        time.Advance(TimeSpan.FromMinutes(2));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Two_asks_for_one_place_while_one_is_out_make_one_request()
+    {
+        var handler = new HangingHandler();
+        var client = new MetNorwayClient(handler, CachePath, new ManualTime());
+        using var cancel = new CancellationTokenSource();
+
+        var first = client.GetAsync(Place, cancel.Token);
+        await handler.Started.Task;
+        var second = client.GetAsync(Place, cancel.Token);
+        await Task.Delay(50);
+
+        Assert.Equal(1, handler.Requests);
+        Assert.Same(first, second);
+        cancel.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
     }
 }

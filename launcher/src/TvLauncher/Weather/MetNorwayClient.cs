@@ -89,7 +89,7 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
                 request.Headers.TryAddWithoutValidation("If-Modified-Since", since);
 
             using var response = await _http.SendAsync(request, both.Token);
-            var expires = response.Content.Headers.Expires ?? time.GetUtcNow() + DefaultLife;
+            var expires = time.GetUtcNow() + Lifetime(response);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotModified && kept is not null)
             {
@@ -135,6 +135,18 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
         {
             return Failed("network", key, AfterFailure);
         }
+    }
+
+    // How long an answer stays fresh, counted on this box's clock. Expires is the server's moment, so it is measured
+    // against the server's own Date (the box clock may be wrong). A missing, unparsable or already past Expires gets
+    // the default hour rather than an answer that is stale at once and asked for again on every visit.
+    private TimeSpan Lifetime(HttpResponseMessage response)
+    {
+        var expires = response.Content.Headers.Expires;
+        if (expires is not { } at || at.Year < 2000)
+            return DefaultLife;
+        var life = at - (response.Headers.Date ?? time.GetUtcNow());
+        return life > TimeSpan.Zero ? life : DefaultLife;
     }
 
     // At most two decimals (about 1 km): MET Norway allows four, and the page asks with what Coordinates already rounded.
