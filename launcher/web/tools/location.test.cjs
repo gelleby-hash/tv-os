@@ -1231,6 +1231,40 @@ test('a MET Norway reply for an earlier place is ignored and not saved under the
   assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, 'metno');
 });
 
+for (const [label, coordinates] of [['no coordinates', []], ['one coordinate', [20]], ['coordinates that are not a list', {}]]) {
+  test('a MET Norway reply with ' + label + ' is ignored', async () => {
+    const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+    page.deliver(placeMessage('config'));
+    await page.settle();
+    const reply = backupReply();
+    reply.raw.geometry.coordinates = coordinates;
+    page.deliver(reply);
+    await page.settle();
+    assert.equal(page.$('weather').hidden, true);
+    assert.equal(page.storage[CACHE_KEY], undefined);
+  });
+}
+
+test('a reply is ignored while a fresh Open-Meteo forecast for the place is on screen, with its ask still out', async () => {
+  // The first place's fetch fails (so it asks); the second place's never answers (so it does not ask and the first ask stays out).
+  const fetch = url => (/latitude=30/.test(url) ? new Promise(() => {}) : Promise.reject(new Error('offline')));
+  const page = await pageWith({ config: BACKUP_CONFIG(), storage: oldForecast(2), fetch });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(backups(page).length, 1);
+  page.deliver(Object.assign(placeMessage('picked'), { latitude: 30, longitude: 40 }));
+  await page.settle();
+  assert.equal(backups(page).length, 1, 'the second place asks nothing');
+  page.storage[CACHE_KEY] = oldForecast(0.5)[CACHE_KEY];
+  page.deliver(Object.assign(placeMessage('picked'), { latitude: 10, longitude: 20 }));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  page.deliver(backupReply(10, 20, NOW + 1000));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, undefined);
+});
+
 test('the forecast header says Updated HH:MM. Based on data from MET Norway only for metno', async () => {
   const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
   page.deliver(placeMessage('config'));
