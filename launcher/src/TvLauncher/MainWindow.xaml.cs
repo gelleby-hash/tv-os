@@ -62,6 +62,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _photoTimer;
     private DispatcherTimer? _focusTimer;
     private ForegroundProbe? _probe;
+    private NetworkWatcher? _network;
+    private WindowsNetworkSource? _networkSource;
     private IReadOnlyList<string>? _photoUrls;
     private bool _pageReady;
     private bool _exiting;
@@ -547,6 +549,7 @@ public partial class MainWindow : Window
         PostBoost();
         PostApps();
         PostPhotos();
+        PostNetwork();
         if (_location is { } location)
             RunLocation(location.RefreshAsync);
     }
@@ -692,6 +695,14 @@ public partial class MainWindow : Window
             Post(new { type = "backgrounds", urls = _photoUrls });
     }
 
+    // Windows raises its change on a thread-pool thread; the page is posted to from the window's thread.
+    private void PostNetwork()
+    {
+        _network ??= new NetworkWatcher(_networkSource = new WindowsNetworkSource(),
+            message => Dispatcher.InvokeAsync(() => Post(message)), _timing);
+        _network.PostCurrent();
+    }
+
     private void Post(object message)
     {
         try
@@ -811,6 +822,8 @@ public partial class MainWindow : Window
         _photoTimer?.Stop();
         _focusTimer?.Stop();
         _probe?.Dispose();
+        _network?.Dispose();
+        _networkSource?.Dispose();
         // The phone remote goes before the hook: a press already queued to this thread then finds no presser,
         // rather than reaching the shell with no hook (the Rii's Home is Browser Home, which opens a browser).
         _presser = null;
