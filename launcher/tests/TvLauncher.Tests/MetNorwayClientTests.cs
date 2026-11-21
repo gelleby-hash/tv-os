@@ -276,6 +276,48 @@ public sealed class MetNorwayClientTests : IDisposable
         Assert.Equal(2, handler.Requests.Count);
     }
 
+    [Fact]
+    public async Task A_refusals_wait_survives_a_restart()
+    {
+        var time = new ManualTime();
+        var clock = new BoxClock(time, BoxNow);
+        await new MetNorwayClient(Replying(HttpStatusCode.Forbidden), CachePath, clock).GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromHours(1));
+        var handler = Replying(HttpStatusCode.Forbidden);
+        var restarted = new MetNorwayClient(handler, CachePath, clock);
+        var answer = await restarted.GetAsync(Place, CancellationToken.None);
+
+        Assert.Empty(handler.Requests);
+        Assert.Equal("wait", answer.Status);
+    }
+
+    [Fact]
+    public async Task A_stored_wait_that_has_passed_lets_a_request_through_after_a_restart()
+    {
+        var time = new ManualTime();
+        var clock = new BoxClock(time, BoxNow);
+        await new MetNorwayClient(Replying(HttpStatusCode.Forbidden), CachePath, clock).GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromHours(6.1));
+        var handler = Replying(HttpStatusCode.Forbidden);
+        await new MetNorwayClient(handler, CachePath, clock).GetAsync(Place, CancellationToken.None);
+
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task An_unreadable_wait_file_is_no_wait()
+    {
+        File.WriteAllText(Path.Combine(_dir, "metno-cache-wait.json"), "not json");
+        var handler = new FakeHandler(_ => Task.FromResult(Ok(DateTimeOffset.UtcNow.AddMinutes(30))));
+
+        var answer = await new MetNorwayClient(handler, CachePath, TimeProvider.System).GetAsync(Place, CancellationToken.None);
+
+        Assert.Single(handler.Requests);
+        Assert.True(answer.Ok);
+    }
+
     private static readonly DateTimeOffset BoxNow = new(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
 
     private static HttpResponseMessage OkWithDate(DateTimeOffset date, string? expires)
