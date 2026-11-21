@@ -62,17 +62,17 @@ public sealed class NetworkWatcherTests : IDisposable
     }
 
     [Fact]
-    public void Overlapping_changes_end_on_the_state_the_source_ended_on()
+    public async Task Overlapping_changes_end_on_the_state_the_source_ended_on()
     {
         // The first read is slow after it has taken its answer, as a thread-pool thread can be; a second change
         // arrives meanwhile and reads the newer state. The last post must still be the newer one.
         _source.State = NetState.Local;
         _source.SlowFirstRead = true;
         var a = Task.Run(_source.Raise);
-        Thread.Sleep(50);
+        await Task.Delay(50);
         _source.State = NetState.Internet;
         var b = Task.Run(_source.Raise);
-        Task.WaitAll(a, b);
+        await Task.WhenAll(a, b);
         Assert.Equal("{\"type\":\"net\",\"state\":\"internet\"}", Json(_posts[^1]));
     }
 

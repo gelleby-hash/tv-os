@@ -299,7 +299,8 @@
   H.on('weatherBackup', function (msg) {
     if (!msg || !msg.ok || !msg.raw || !weatherKey || backupFor !== weatherKey) return;
     var c = msg.raw.geometry && msg.raw.geometry.coordinates, r = W.rounded(place);
-    if (!c || Math.abs(c[1] - r.latitude) > 0.01 || Math.abs(c[0] - r.longitude) > 0.01) return;
+    // Written so that anything not two numbers near the place (a short list, text, NaN) fails the check rather than slips past it.
+    if (!Array.isArray(c) || !(Math.abs(c[1] - r.latitude) <= 0.01 && Math.abs(c[0] - r.longitude) <= 0.01)) return;
     if (weather && weather.source !== 'metno' && Date.now() - weather.fetchedAt <= 3600e3) return;
     var fetchedAt = typeof msg.fetchedAt === 'number' ? msg.fetchedAt : Date.now();
     var w;

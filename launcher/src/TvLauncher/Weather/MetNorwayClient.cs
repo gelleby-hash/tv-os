@@ -26,8 +26,11 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
     private readonly Dictionary<string, Task<BackupResult>> _inFlight = [];
     private Dictionary<string, Entry>? _cache;
 
-    // Per place, the clock reading before which no request is sent after a failed answer. Kept in memory only.
+    // Per place, the clock reading before which no request is sent after a failed answer. The end of each wait is also
+    // written beside the cache as a wall-clock time, so a restart (the watchdog brings the launcher back within a minute)
+    // does not ask MET Norway again at once after it refused.
     private readonly Dictionary<string, long> _waitUntil = [];
+    private Dictionary<string, DateTimeOffset>? _storedWaits;
 
     /// <summary>The name MET Norway sees: this program and where to reach its maker, never a browser's.</summary>
     public static string UserAgent { get; } =
@@ -73,6 +76,7 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
         // After a failure the page may ask again every couple of minutes; MET Norway must not be asked that often.
         lock (_lock)
         {
+            StoredWaits();
             if (_waitUntil.TryGetValue(key, out var until) && time.GetTimestamp() < until)
                 return Failed("wait");
         }
@@ -165,14 +169,67 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
     private BackupResult Failed(string status, string key, TimeSpan wait)
     {
         lock (_lock)
+        {
             _waitUntil[key] = time.GetTimestamp() + (long)(wait.TotalSeconds * time.TimestampFrequency);
+            StoredWaits()[key] = time.GetUtcNow() + wait;
+            WriteWaits();
+        }
         return Failed(status);
     }
 
     private void Forgive(string key)
     {
         lock (_lock)
+        {
             _waitUntil.Remove(key);
+            if (StoredWaits().Remove(key))
+                WriteWaits();
+        }
+    }
+
+    private string WaitPath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(cachePath))!, Path.GetFileNameWithoutExtension(cachePath) + "-wait.json");
+
+    // Read once, under _lock: what is left of each stored wait becomes a wait on this run's clock. A missing or unreadable
+    // file means no wait.
+    private Dictionary<string, DateTimeOffset> StoredWaits()
+    {
+        if (_storedWaits is not null)
+            return _storedWaits;
+        try
+        {
+            _storedWaits = JsonSerializer.Deserialize<Dictionary<string, DateTimeOffset>>(File.ReadAllText(WaitPath)) ?? [];
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            _storedWaits = [];
+        }
+        var now = time.GetUtcNow();
+        foreach (var (key, until) in _storedWaits)
+        {
+            var left = until - now;
+            if (left > TimeSpan.Zero && !_waitUntil.ContainsKey(key))
+                _waitUntil[key] = time.GetTimestamp() + (long)(left.TotalSeconds * time.TimestampFrequency);
+        }
+        return _storedWaits;
+    }
+
+    // Called under _lock. Waits already over are dropped; a write that fails leaves the wait in memory only.
+    private void WriteWaits()
+    {
+        var now = time.GetUtcNow();
+        var waits = StoredWaits();
+        foreach (var key in waits.Where(w => w.Value <= now).Select(w => w.Key).ToList())
+            waits.Remove(key);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(WaitPath)!);
+            var temp = WaitPath + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(waits));
+            File.Move(temp, WaitPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     // The cache is read once; a missing or unreadable file is an empty cache.

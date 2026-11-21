@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly LauncherConfig _config;
     private readonly TimingLog _timing;
     private MetNorwayClient? _metNorway;
+    private string? _lastBackupStatus;
     private readonly bool _dev;
     private readonly Stopwatch _sinceStart = Stopwatch.StartNew();
 
@@ -716,13 +717,16 @@ public partial class MainWindow : Window
         _network.PostCurrent();
     }
 
-    // The fetch runs off the window's thread and the reply is posted from it. The log names the outcome, never the place.
+    // The fetch runs off the window's thread and the reply is posted from it. The log names the outcome, never the place,
+    // and only when it differs from the last one: during an outage the page asks every couple of minutes.
     private async Task AnswerBackupAsync(Coordinates place)
     {
         try
         {
             var result = await Task.Run(() => _metNorway!.GetAsync(place, CancellationToken.None));
-            _timing.Mark("weather backup: met norway " + result.Status);
+            if (result.Status != _lastBackupStatus)
+                _timing.Mark("weather backup: met norway " + result.Status);
+            _lastBackupStatus = result.Status;
             if (result.Ok && result.RawJson is not null)
             {
                 using var raw = JsonDocument.Parse(result.RawJson);
