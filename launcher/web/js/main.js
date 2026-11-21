@@ -280,7 +280,8 @@
     var asked = weatherKey;
     W.fetch(place).then(function (w) {
       if (asked !== weatherKey) return;
-      weather = w; weatherError = null; renderAll();
+      // Open-Meteo is back, so a MET Norway answer still on its way is no longer wanted.
+      weather = w; weatherError = null; backupFor = ''; renderAll();
     }).catch(function (e) {
       if (asked !== weatherKey) return;
       weatherError = e; renderWeather();
@@ -293,12 +294,14 @@
     });
   }
 
-  // The host's answer with MET Norway's forecast. A failed ask changes nothing. An answer for a place no longer shown, or one
-  // older than the Open-Meteo forecast now on screen, is dropped.
+  // The host's answer with MET Norway's forecast. A failed ask changes nothing. An answer for a place no longer shown (its own
+  // coordinates say which place it is for), or one that arrives while a fresh Open-Meteo forecast is on screen, is dropped.
   H.on('weatherBackup', function (msg) {
     if (!msg || !msg.ok || !msg.raw || !weatherKey || backupFor !== weatherKey) return;
+    var c = msg.raw.geometry && msg.raw.geometry.coordinates, r = W.rounded(place);
+    if (!c || Math.abs(c[1] - r.latitude) > 0.01 || Math.abs(c[0] - r.longitude) > 0.01) return;
+    if (weather && weather.source !== 'metno' && Date.now() - weather.fetchedAt <= 3600e3) return;
     var fetchedAt = typeof msg.fetchedAt === 'number' ? msg.fetchedAt : Date.now();
-    if (weather && weather.source !== 'metno' && weather.fetchedAt >= fetchedAt) return;
     var w;
     try { w = W.saveMetNorway(msg.raw, fetchedAt, place); } catch (e) { return; }
     weather = w;
