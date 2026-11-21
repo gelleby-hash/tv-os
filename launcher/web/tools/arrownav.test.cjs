@@ -279,13 +279,15 @@ test('arrows: Right at the screen edge reaches the next tile off screen, never t
   assert.ok(ev.prevented, 'and the page does not scroll');
 });
 
-test('arrows: Down and Up go to the tile under or over, in the next row', () => {
+// Since 2026-11-21 (owner) the next row starts at its left, not under the tile in focus.
+test('arrows: Down and Up go to the next row and start at its leftmost tile', () => {
   const p = homePage();
   p.top.tiles[2].focus();
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'B3');
+  assert.equal(focused(p), 'B1');
+  p.low.tiles[3].focus();
   press(p, 'ArrowUp');
-  assert.equal(focused(p), 'A3');
+  assert.equal(focused(p), 'A1');
 });
 
 test('arrows: Up from the page goes to the page above first, the fixed top bar last', () => {
@@ -349,7 +351,7 @@ test('arrows: Down and Up never jump to a carousel tile out of sight', () => {
   const p = homePage({ carousel: true });
   p.low.tiles[4].focus();   // B5, over C6
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'C6', 'the tile in sight under it, not C8 or C9 out of sight');
+  assert.equal(focused(p), 'C1', 'the row\'s leftmost tile in sight, not C8 or C9 out of sight');
   assert.deepEqual(p.c4.box.swiper.slid, []);
 });
 
@@ -444,7 +446,7 @@ test('arrows: Down from an item stretched across the page goes to the nearest it
   const p = titlePage();
   p.logo.focus();
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'Like', 'the row of buttons, the nearest below; not the synopsis under the middle of the logo link');
+  assert.equal(focused(p), 'Watch trailer', 'the row of buttons, the nearest below, at its left; not the synopsis under the middle of the logo link');
   press(p, 'ArrowDown');
   assert.equal(focused(p), 'Play');
 });
@@ -497,19 +499,20 @@ test('arrows: a video that is hidden, or not fixed over the page (a trailer on a
   p.layer.rect = p.video.rect = [0, 0, 1920, 1080];
   p.video.style.position = 'static';
   assert.ok(press(p, 'ArrowUp').prevented, 'a big video in the page itself');
-  assert.equal(focused(p), 'Like', 'the button over the middle of Play');
+  assert.equal(focused(p), 'Watch trailer', 'the row of buttons over Play, at its left');
 });
 
 // On the mini PC Down from a tile went to the next row's "See more" link, and from a banner's title to its small
 // Watchlist button, skipping Watch now (2026-11-15): from the 2026-11-14 scoring on, whatever lay across from the
 // current item counted as straight ahead, so the nearest edge won.
-test('arrows: Down from a tile goes to the tile under it, not the small link between the rows', () => {
+test('arrows: Down from a tile goes to the next row of tiles, not the small link between the rows', () => {
   const p = primeHome();
   p.top[1].focus();
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'The Mongoose');
+  assert.equal(focused(p), 'Project Hail Mary', 'the next row, at its left');
+  p.low[2].focus();
   press(p, 'ArrowUp');
-  assert.equal(focused(p), 'Love in Disguise');
+  assert.equal(focused(p), 'LOL');
 });
 
 test('arrows: Down from a banner title goes to the wide Watch now button under it, not the small button beside that', () => {
@@ -536,11 +539,11 @@ test('arrows: a link stretched behind other items (a banner image under its butt
   press(p, 'ArrowDown');
   assert.equal(focused(p), 'Pacers title');
   // A tile is not a backdrop: it holds nothing, and the link of a tile holding its own button is still a target.
-  const own = new El('button', { 'aria-label': 'Own button' }, [400, 880, 40, 40]);
-  p.low[1].add(own);
+  const own = new El('button', { 'aria-label': 'Own button' }, [96, 880, 40, 40]);
+  p.low[0].add(own);
   p.top[1].focus();
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'The Mongoose');
+  assert.equal(focused(p), 'Project Hail Mary');
 });
 
 
@@ -555,7 +558,7 @@ test('arrows: a tile scrolled under the fixed menu bar is still a target, though
   p.low.forEach(t => { t.rect = [t.rect[0], 140, 280, 158]; });
   p.low[1].focus();
   press(p, 'ArrowUp');
-  assert.equal(focused(p), 'Love in Disguise');
+  assert.equal(focused(p), 'LOL', 'the row under the bar, at its left');
 });
 
 // Prime's title page under the buttons (measured 2026-11-15 at 1920 x 1080): the season selector, a checkbox moved
@@ -787,7 +790,7 @@ test('arrows: an item laid over the one in focus (a button in its corner) is not
   press(p, 'ArrowRight');
   assert.equal(focused(p), 'Episode 2', 'not its own Download button on the way');
   press(p, 'ArrowDown');
-  assert.equal(focused(p), 'Episode 6');
+  assert.equal(focused(p), 'Episode 5', 'the next row of episodes, at its left');
 });
 
 test('arrows: Up or Down into a row of tabs lands on the selected tab', () => {
@@ -1163,11 +1166,13 @@ function netflixPage({ pathname = '/browse' } = {}) {
   more.click = function () { this.clicks = (this.clicks || 0) + 1; shift(-7 * 256); };
   prev.click = function () { this.clicks = (this.clicks || 0) + 1; shift(7 * 256); };
   scroller.add(track, prev, more);
+  // A row with one card (a short My List), then a full row under it.
   const below = new El('a', { href: '/title/below', 'data-uia': 'standard-card', 'aria-label': 'Below' }, [60, 692, 250, 141]);
+  const third = [1, 2, 3, 4, 5, 6, 7].map((n, i) => new El('a', { href: '/title/r3-' + n, 'data-uia': 'standard-card', 'aria-label': 'Third ' + n }, [60 + i * 256, 914, 250, 141]));
   // The privacy dialog, there all along: marked aria-modal, measuring nothing.
   const privacy = new El('div', { role: 'dialog', 'aria-modal': 'true' }, [0, 0, 0, 0]);
   privacy.add(new El('button', { 'aria-label': 'Close preference center' }, [0, 0, 0, 0]));
-  body.add(bar, scroller, below, privacy);
+  body.add(bar, scroller, below, ...third, privacy);
   // The detail panel, added when OK opens it.
   const panel = new El('div', { role: 'dialog', 'aria-modal': 'true', tabindex: -1 }, [431, 32, 1058, 1900]);
   const play = new El('button', { 'data-uia': 'play-button', 'aria-label': 'Play' }, [483, 519, 92, 40]);
@@ -1177,21 +1182,130 @@ function netflixPage({ pathname = '/browse' } = {}) {
   panel.add(play, myList, close, episode);
   // The player page: Netflix's player element, focused, over a video filling the screen; nothing in it is fixed.
   const player = new El('div', { 'data-uia': 'player', tabindex: 0, 'aria-label': 'Player' }, [0, 0, 1920, 1080], { position: 'absolute' });
-  const video = new El('video', {}, [0, -3, 1920, 1087], { position: 'absolute' });
+  const video = new El('video', { tabindex: -1 }, [0, -3, 1920, 1087], { position: 'absolute' });
+  // Its controls, drawn only after a real mouse move (measured 2026-11-21): Back to Browse and Report at the top, a
+  // timeline knob, then one bottom row with Pause at its left and Next episode on the right, inside a box Netflix
+  // focuses itself after a key (controls-standard, tabindex 0).
+  const button = (uia, label, x, y, w = 44, h = 44, more = {}) => new El('button', Object.assign({ 'data-uia': uia, 'aria-label': label }, more), [x, y, w, h]);
+  const backToBrowse = button('control-nav-back', 'Back to Browse', 30, 30);
+  const report = button('control-flag', 'Report a playback problem', 1838, 30);
+  const knob = button('timeline-knob', 'Seek time scrubber', 69, 930, 15, 15, { tabindex: 0, role: 'slider' });
+  const pause = button('control-play-pause-pause', 'Pause', 20, 979);
+  const back10 = button('control-back10', 'Seek back', 102, 979);
+  const fwd10 = button('control-forward10', 'Seek forward', 184, 979);
+  const nextEpisode = button('control-next', 'Next episode', 1490, 979);
+  const episodes = button('control-episodes', 'Episodes', 1572, 979);
+  const controlsBox = new El('div', { 'data-uia': 'controls-standard', tabindex: 0, 'aria-label': 'Controls' }, [0, 927, 1920, 135]);
+  controlsBox.add(knob, pause, back10, fwd10, nextEpisode, episodes);
   if (pathname.startsWith('/watch/')) { body.children.length = 0; body.add(player.add(video)); }
-  const p = run(doc, pathname, { cards, prev, more, below, panel, play, myList, close, episode, player, video });
+  const p = run(doc, pathname, { cards, prev, more, below, third, panel, play, myList, close, episode, player, video,
+    backToBrowse, knob, pause, back10, fwd10, nextEpisode, controlsBox });
   p.openPanel = () => body.add(panel);
+  p.showControls = () => player.add(backToBrowse, report, controlsBox);
   return p;
 }
 
-test('netflix: the player page (/watch/) keeps every key, as a player page of its own', () => {
+test('netflix: in the player (/watch/) Left, Right and OK stay Netflix\'s while no button is picked', () => {
   const p = netflixPage({ pathname: '/watch/80018499' });
+  p.showControls();
   p.player.focus();
-  for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Enter']) {
+  for (const key of ['ArrowRight', 'ArrowLeft', 'Enter']) {
     const ev = press(p, key);
-    assert.equal(ev.prevented || ev.stopped, false, key + ' goes on to Netflix, which seeks or changes the volume');
+    assert.equal(ev.prevented || ev.stopped, false, key + ' goes on to Netflix, which seeks or pauses');
     assert.equal(focused(p), 'Player', key + ': the focus stays on the player');
   }
+  // Netflix moves the focus to its controls box itself after a key: that box is not a picked button.
+  p.controlsBox.focus();
+  assert.equal(press(p, 'ArrowRight').prevented || false, false, 'still a seek');
+});
+
+// Owner, 2026-11-21: in Netflix's player Left and Right seek and Up and Down set the volume, so its on-screen
+// controls (Next episode, Episodes, subtitles) could not be reached. As in Prime's player, Up or Down picks a button.
+test('netflix: in the player Up or Down picks Pause first, not the nearest button, and Netflix never sees the key', () => {
+  const p = netflixPage({ pathname: '/watch/80018499' });
+  p.showControls();
+  p.player.focus();
+  const ev = press(p, 'ArrowDown');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(focused(p), 'Pause', 'Pause, so a stray OK does not skip to the next episode');
+  assert.ok(p.pause.hasAttribute('data-tv-pick'));
+  assert.ok(p.posted.some(m => m.tvPointer === 'wake'), 'the launcher is asked for a real mouse move, so the controls show');
+});
+
+test('netflix: in the player, with a button picked, Right moves along the buttons and OK presses one', () => {
+  const p = netflixPage({ pathname: '/watch/80018499' });
+  p.showControls();
+  p.player.focus();
+  press(p, 'ArrowDown');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Seek back');
+  const ev = press(p, 'Enter');
+  assert.ok(ev.prevented && ev.stopped, 'Netflix does not also get OK');
+  assert.equal(p.back10.clicks, 1);
+});
+
+// Netflix keeps the focus on its play button: a script's focus() on another of its buttons does nothing (measured
+// 2026-11-21), so the picked button is the marked one, not the focus.
+test('netflix: in the player the arrows move the pick though Netflix keeps the focus on Pause, and OK presses the picked one', () => {
+  const p = netflixPage({ pathname: '/watch/80018499' });
+  p.showControls();
+  for (const b of [p.back10, p.fwd10, p.nextEpisode]) b.focus = () => {};
+  p.player.focus();
+  press(p, 'ArrowDown');
+  press(p, 'ArrowRight');
+  assert.ok(p.back10.hasAttribute('data-tv-pick'), 'Seek back marked');
+  press(p, 'ArrowRight');
+  assert.ok(p.fwd10.hasAttribute('data-tv-pick') && !p.back10.hasAttribute('data-tv-pick'), 'then Seek forward');
+  assert.equal(focused(p), 'Pause', 'the focus stayed where Netflix keeps it');
+  assert.ok(p.document.head.children.some(c => /html:has\(\[data-tv-pick\]\) :focus:not\(\[data-tv-pick\]\) \{ outline: none/.test(c.textContent || '')),
+    'its focus ring is hidden while another button is picked');
+  const ev = press(p, 'Enter');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(p.fwd10.clicks, 1, 'the marked button is pressed');
+  assert.equal(p.pause.clicks, undefined, 'not the focused one');
+});
+
+test('netflix: in the player Down past the bottom row goes back to watching, where Left and Right seek again', () => {
+  const p = netflixPage({ pathname: '/watch/80018499' });
+  p.showControls();
+  p.player.focus();
+  press(p, 'ArrowDown');
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Player');
+  assert.ok(!p.pause.hasAttribute('data-tv-pick'));
+  assert.equal(press(p, 'ArrowLeft').prevented || false, false);
+});
+
+// Owner, 2026-11-21: Up or Down went to the item in the same column of the next row, so after a few Rights a row
+// shorter than that was passed over, its one card never reached. A TV goes to the next row and starts at its left.
+test('rows: Down from a card goes to the next row, even one with a single card at its left', () => {
+  const p = netflixPage();
+  p.cards[3].focus();
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Below', 'not the card under it two rows down');
+});
+
+test('rows: Up and Down land on the leftmost card of the next row, not the one in the same column', () => {
+  const p = netflixPage();
+  p.third[5].focus();
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Below');
+  press(p, 'ArrowDown');
+  assert.equal(focused(p), 'Third 1');
+  press(p, 'ArrowRight');
+  press(p, 'ArrowRight');
+  press(p, 'ArrowUp');
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Young Sheldon');
+});
+
+test('rows: the leftmost card wholly on screen, not one the row has slid half out at its left', () => {
+  const p = netflixPage();
+  p.cards[6].focus();
+  press(p, 'ArrowRight');   // the row slides; One Piece is cut at the left edge now
+  press(p, 'ArrowDown');
+  press(p, 'ArrowUp');
+  assert.equal(focused(p), 'Stranger Things');
 });
 
 test('netflix: a page whose address only has "watch" in it is not the player', () => {

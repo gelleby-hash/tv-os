@@ -323,10 +323,36 @@ internal static class PageScripts
             return (shown.find(f => fromBar || !pinned(f.e)) || shown[0] || {}).e;
           };
 
-          const next = (cur, d, root) => {
+          // Up and Down start the next line at its left, as on a TV (owner, 2026-11-21: Netflix and Prime Video went to
+          // the item in the same column of the next row, so after a few Rights a row too short to reach that column was
+          // passed over). The scoring still picks the line; the press then lands on the leftmost item of that line of
+          // the same size, wholly on screen (a row slid half a tile out at its left starts at the tile after). From a
+          // tile to a tile, a nearer row of tiles the scoring passed over (one too short) is the line instead. Items of
+          // another size level with it are not the line: Prime's banner title is not a row with its small buttons.
+          const like = (r, c) => r.width >= c.width * 0.6 && r.width <= c.width / 0.6 && r.height >= c.height * 0.6 && r.height <= c.height / 0.6;
+          const lineStart = (found, to, c, inRow, fromBar) => {
+            let t = found.find(f => f.e === to);
+            if (!t) return to;
+            const shown = found.filter(f => !clipped(face(f.e)) && (fromBar || !pinned(f.e)));
+            const level = (f, g) => { const m = f.r.top + f.r.height / 2; return m >= g.r.top && m <= g.r.bottom; };
+            if (inRow && like(t.r, c)) {
+              const near = shown.filter(f => like(f.r, c)).reduce((a, b) => (!a || b.ahead < a.ahead ? b : a), null);
+              if (near && near.ahead < t.ahead && !level(near, t)) t = near;
+            }
+            const band = shown.filter(f => level(f, t) && like(f.r, t.r));
+            if (!band.includes(t)) band.push(t);
+            const whole = band.filter(f => f.r.left >= -1 && f.r.right <= innerWidth + 1);
+            return (whole.length ? whole : band).reduce((a, b) => b.r.left < a.r.left ? b : a).e;
+          };
+
+          // list: the items to choose from, when not every item under root (a player's buttons).
+          const next = (cur, d, root, list) => {
             const c = face(cur).getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
             const found = [], fromBar = pinned(cur);
-            for (const { e, r } of items(root || cur.closest('[role="dialog"]') || document)) {
+            const all = list || items(root || cur.closest('[role="dialog"]') || document);
+            // A tile in a row of tiles: another item of about its size lies level with it.
+            const inRow = d[1] !== 0 && !list && all.some(({ e, r }) => e !== cur && !e.contains(cur) && !cur.contains(e) && r.top <= cy && r.bottom >= cy && like(r, c));
+            for (const { e, r } of all) {
               if (e === cur || e.contains(cur) || cur.contains(e)) continue;
               // Laid over the item in focus, not beside it: Prime Video's focus card puts the episode's Download button
               // in the corner of its picture (2026-11-15).
@@ -361,14 +387,16 @@ internal static class PageScripts
               const shared = d[0] !== 0 ? Math.min(r.bottom, c.bottom) - Math.max(r.top, c.top) : Math.min(r.right, c.right) - Math.max(r.left, c.left);
               const share = Math.max(shared, 0) / (d[0] !== 0 ? Math.max(r.height, c.height) : Math.max(r.width, c.width));
               const size = d[0] !== 0 ? c.width : c.height;
-              found.push({ e, ahead: Math.max(ahead, 0), score: Math.max(ahead, 0) + off * 2 + centres / 10 + (1 - share) * size });
+              found.push({ e, r, ahead: Math.max(ahead, 0), score: Math.max(ahead, 0) + off * 2 + centres / 10 + (1 - share) * size });
             }
             // Along a row, a button laid over the row the item is in (over a box that holds the item, not the button)
             // is the row's own, for a mouse, and never a target: the tile past it is, and pager presses the button for
             // it. Prime Video's search results show "next 5 titles" over the row's edge, nearer than the tile it cuts,
             // and the focus stopped on it with the row never sliding; at the row's end it stays (2026-11-21).
             if (d[0] !== 0) for (let i = found.length - 1; i >= 0; i--) if (overRow(found[i].e, cur)) found.splice(i, 1);
-            const to = rank(found, fromBar, d[0]);
+            // Not among a player's buttons (list): Up there goes to the button above, as before.
+            const ranked = rank(found, fromBar, d[0]);
+            const to = d[1] !== 0 && !list && ranked ? lineStart(found, ranked, c, inRow, fromBar) : ranked;
             // Up and Down never pass a row of tabs, which switches what is shown under it: they stop on its selected
             // tab, as on a TV. From Prime Video's episodes, Up went to whichever of Episodes, Related and Details lay
             // nearest, or over them to the wide synopsis above (2026-11-15).
@@ -407,12 +435,16 @@ internal static class PageScripts
 
           // A video filling the screen inside a layer fixed over the page: a player that keeps the page's address
           // (Prime Video plays over its title page, 2026-11-14). Returns that layer. A trailer in the page itself is
-          // not fixed, and the hidden layer measures nothing.
+          // not fixed, and the hidden layer measures nothing. On Netflix's player page (/watch/) nothing is fixed; its
+          // player is the element round the video that takes the focus, and it holds the controls (2026-11-21).
           const playerLayer = () => {
+            const watch = /\/watch\//.test(location.pathname);
             for (const v of document.querySelectorAll('video')) {
               const r = v.getBoundingClientRect();
               if (r.width < innerWidth * 0.9 || r.height < innerHeight * 0.9) continue;
               for (let p = v; p; p = p.parentElement) if (getComputedStyle(p).position === 'fixed') return p;
+              if (watch) for (let p = v.parentElement; p; p = p.parentElement)
+                if (p.hasAttribute('tabindex') && p.getAttribute('tabindex') !== '-1') return p;
             }
             return null;
           };
@@ -436,17 +468,26 @@ internal static class PageScripts
           // each key in the player sends. Up or Down picks the one nearest the bottom middle (pause), then the arrows
           // move between them and OK presses one; Up past the top row or Down past the bottom row goes back to
           // watching. Left, Right and OK stay the player's while nothing is picked, and again once the controls fade.
+          // A player's buttons: an item holding other items is a box of them, not one (Netflix focuses its controls box
+          // itself after a key, and Left and Right must still seek then, 2026-11-21).
+          const controls = (layer) => { const all = items(layer); return all.filter(a => !all.some(b => b !== a && a.e.contains(b.e))); };
+          // Pause or Play first where there is one: Netflix has no button at the bottom middle, and the nearest was Next
+          // episode, which a stray OK would press (2026-11-21).
           const startIn = (layer) => {
             const found = [];
-            for (const { e, r } of items(layer)) if (onScreen(r))
-              found.push({ e, score: Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight) });
+            for (const { e, r } of controls(layer)) if (onScreen(r))
+              found.push({ e, score: /^(pause|play)$/i.test((e.getAttribute('aria-label') || '').trim()) ? -1
+                : Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight) });
             return rank(found, true);
           };
           // Prime draws no focus mark on its player buttons (outline none, a clear background, 2026-11-15): the
           // picked one gets the launcher's own.
           let marked = null;
           const pickStyle = document.createElement('style');
-          pickStyle.textContent = '[data-tv-pick] { outline: 3px solid #fff !important; outline-offset: 4px !important; }';
+          // While a button is picked, no other shows a focus ring: Netflix keeps the focus, and its ring, on its play
+          // button, so two buttons looked picked (2026-11-21).
+          pickStyle.textContent = '[data-tv-pick] { outline: 3px solid #fff !important; outline-offset: 4px !important; }'
+            + ' html:has([data-tv-pick]) :focus:not([data-tv-pick]) { outline: none !important; }';
           const mark = (e) => {
             if (marked && marked !== e) marked.removeAttribute('data-tv-pick');
             marked = e;
@@ -457,14 +498,20 @@ internal static class PageScripts
           const pickKey = (layer, ev) => {
             const d = DIRS[ev.key];
             if ((!d && ev.key !== 'Enter') || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return false;
-            const cur = deep();
-            const picked = cur && cur !== layer && items(layer).some(i => i.e === cur);
+            // The picked button is the one the launcher marked, not the focus: Netflix keeps the focus on its play button,
+            // and a script's focus() on another of its buttons does nothing (measured 2026-11-21), so the next press
+            // started from Pause again. Once the controls fade the marked button is no longer one of them. With none
+            // marked, a player button with the focus counts, as before (Prime).
+            const buttons = controls(layer);
+            const own = (e) => e && e !== layer && buttons.some(i => i.e === e);
+            const cur = marked && marked.isConnected && own(marked) ? marked : own(deep()) ? deep() : null;
+            const picked = !!cur;
             if (!picked && (!d || d[1] === 0)) return false;
             ev.preventDefault();
             ev.stopImmediatePropagation();
             if (picked && !d) { cur.click(); afterPlayer(layer); return true; }
             if (picked) {
-              const to = next(cur, d, layer);
+              const to = next(cur, d, layer, buttons);
               if (to) { to.focus({ preventScroll: true }); mark(to); }
               else if (d[1] !== 0) { layer.focus({ preventScroll: true }); mark(null); }
               return true;
