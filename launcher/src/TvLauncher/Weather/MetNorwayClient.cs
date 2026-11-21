@@ -18,11 +18,16 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan DefaultLife = TimeSpan.FromHours(1);
+    private static readonly TimeSpan AfterFailure = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan AfterRefusal = TimeSpan.FromHours(6);
 
     private readonly HttpClient _http = new(handler, disposeHandler: false) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
     private readonly object _lock = new();
     private readonly Dictionary<string, Task<BackupResult>> _inFlight = [];
     private Dictionary<string, Entry>? _cache;
+
+    // Per place, the clock reading before which no request is sent after a failed answer. Kept in memory only.
+    private readonly Dictionary<string, long> _waitUntil = [];
 
     /// <summary>The name MET Norway sees: this program and where to reach its maker, never a browser's.</summary>
     public static string UserAgent { get; } =
@@ -63,7 +68,14 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
         lock (_lock)
             kept = Cache().GetValueOrDefault(key);
         if (kept is not null && time.GetUtcNow() < kept.Expires)
-            return Answer(kept);
+            return Answer(kept, "kept");
+
+        // After a failure the page may ask again every couple of minutes; MET Norway must not be asked that often.
+        lock (_lock)
+        {
+            if (_waitUntil.TryGetValue(key, out var until) && time.GetTimestamp() < until)
+                return Failed("wait");
+        }
 
         try
         {
@@ -83,10 +95,18 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
             {
                 var renewed = kept with { Expires = expires };
                 Store(key, renewed);
-                return Answer(renewed);
+                Forgive(key);
+                return Answer(renewed, "304");
             }
             if (!response.IsSuccessStatusCode)
-                return Failed(((int)response.StatusCode).ToString(CultureInfo.InvariantCulture));
+            {
+                var code = (int)response.StatusCode;
+                var wait = code is 403 or 429 ? AfterRefusal : AfterFailure;
+                var asked = response.Headers.RetryAfter is { } after
+                    ? after.Delta ?? (after.Date is { } date ? date - time.GetUtcNow() : TimeSpan.Zero)
+                    : TimeSpan.Zero;
+                return Failed(code.ToString(CultureInfo.InvariantCulture), key, asked > wait ? asked : wait);
+            }
 
             var raw = await response.Content.ReadAsStringAsync(both.Token);
             try
@@ -95,16 +115,17 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
             }
             catch (JsonException)
             {
-                return Failed("invalid");
+                return Failed("invalid", key, AfterFailure);
             }
             var modified = response.Content.Headers.TryGetValues("Last-Modified", out var values) ? values.FirstOrDefault() : null;
             var fresh = new Entry(raw, expires, modified, time.GetUtcNow().ToUnixTimeMilliseconds());
             Store(key, fresh);
-            return Answer(fresh);
+            Forgive(key);
+            return Answer(fresh, "200");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return Failed("timeout");
+            return Failed("timeout", key, AfterFailure);
         }
         catch (OperationCanceledException)
         {
@@ -112,7 +133,7 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            return Failed("network");
+            return Failed("network", key, AfterFailure);
         }
     }
 
@@ -125,9 +146,22 @@ public sealed class MetNorwayClient(HttpMessageHandler handler, string cachePath
         + place.Latitude.ToString("0.##", CultureInfo.InvariantCulture)
         + "&lon=" + place.Longitude.ToString("0.##", CultureInfo.InvariantCulture));
 
-    private static BackupResult Answer(Entry entry) => new(true, "ok", entry.Raw, entry.FetchedAt);
+    private static BackupResult Answer(Entry entry, string status) => new(true, status, entry.Raw, entry.FetchedAt);
 
     private static BackupResult Failed(string status) => new(false, status, null, 0);
+
+    private BackupResult Failed(string status, string key, TimeSpan wait)
+    {
+        lock (_lock)
+            _waitUntil[key] = time.GetTimestamp() + (long)(wait.TotalSeconds * time.TimestampFrequency);
+        return Failed(status);
+    }
+
+    private void Forgive(string key)
+    {
+        lock (_lock)
+            _waitUntil.Remove(key);
+    }
 
     // The cache is read once; a missing or unreadable file is an empty cache.
     private Dictionary<string, Entry> Cache()

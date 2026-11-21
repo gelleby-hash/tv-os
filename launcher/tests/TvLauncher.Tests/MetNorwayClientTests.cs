@@ -59,6 +59,7 @@ public sealed class MetNorwayClientTests : IDisposable
         var result = await client.GetAsync(Place, CancellationToken.None);
 
         Assert.True(result.Ok);
+        Assert.Equal("200", result.Status);
         Assert.Equal(Body, result.RawJson);
         var request = Assert.Single(handler.Requests);
         Assert.Matches(new Regex(@"^TvLauncher/\d+\.\d+ github\.com/gelleby-hash/tv-os$"), MetNorwayClient.UserAgent);
@@ -80,6 +81,7 @@ public sealed class MetNorwayClientTests : IDisposable
 
         Assert.Single(handler.Requests);
         Assert.True(second.Ok);
+        Assert.Equal("kept", second.Status);
         Assert.Equal(first.RawJson, second.RawJson);
         Assert.Equal(first.FetchedAtMs, second.FetchedAtMs);
     }
@@ -100,6 +102,7 @@ public sealed class MetNorwayClientTests : IDisposable
         Assert.Null(handler.Requests[0].Headers.IfModifiedSince);
         Assert.Equal(DateTimeOffset.Parse("2026-11-21T10:00:00Z"), handler.Requests[1].Headers.IfModifiedSince);
         Assert.True(second.Ok);
+        Assert.Equal("304", second.Status);
         Assert.Equal(first.RawJson, second.RawJson);
         Assert.Equal(first.FetchedAtMs, second.FetchedAtMs);
     }
@@ -184,5 +187,78 @@ public sealed class MetNorwayClientTests : IDisposable
 
         Assert.False(result.Ok);
         Assert.Equal("timeout", result.Status);
+    }
+
+    private static FakeHandler Replying(HttpStatusCode code, Action<HttpResponseMessage>? shape = null) => new(_ =>
+    {
+        var response = new HttpResponseMessage(code);
+        shape?.Invoke(response);
+        return Task.FromResult(response);
+    });
+
+    [Fact]
+    public async Task A_403_then_an_immediate_second_ask_makes_one_request()
+    {
+        var handler = Replying(HttpStatusCode.Forbidden);
+        var client = new MetNorwayClient(handler, CachePath, new ManualTime());
+        await client.GetAsync(Place, CancellationToken.None);
+
+        var second = await client.GetAsync(Place, CancellationToken.None);
+
+        Assert.Single(handler.Requests);
+        Assert.False(second.Ok);
+        Assert.Equal("wait", second.Status);
+    }
+
+    [Fact]
+    public async Task A_500_waits_15_minutes_before_the_next_request()
+    {
+        var time = new ManualTime();
+        var handler = Replying(HttpStatusCode.InternalServerError);
+        var client = new MetNorwayClient(handler, CachePath, time);
+        await client.GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromMinutes(14));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        var third = await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("500", third.Status);
+    }
+
+    [Fact]
+    public async Task A_429_with_Retry_After_of_8_hours_waits_8_hours()
+    {
+        var time = new ManualTime();
+        var handler = Replying((HttpStatusCode)429, r => r.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromHours(8)));
+        var client = new MetNorwayClient(handler, CachePath, time);
+        await client.GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromHours(7.9));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromHours(0.2));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_403_without_Retry_After_waits_6_hours()
+    {
+        var time = new ManualTime();
+        var handler = Replying(HttpStatusCode.Forbidden);
+        var client = new MetNorwayClient(handler, CachePath, time);
+        await client.GetAsync(Place, CancellationToken.None);
+
+        time.Advance(TimeSpan.FromHours(5.9));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromHours(0.2));
+        await client.GetAsync(Place, CancellationToken.None);
+        Assert.Equal(2, handler.Requests.Count);
     }
 }
