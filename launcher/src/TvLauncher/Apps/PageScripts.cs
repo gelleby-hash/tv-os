@@ -237,13 +237,15 @@ internal static class PageScripts
           // (tabindex -1) stretched behind other items it does not hold is left out: Prime Video's banner image lies
           // behind the banner's title and buttons and shows no focus ring, so on it the focus seemed gone (2026-11-15).
           // An item in a bar fixed to the screen is not on the page under it: scrolled up, Prime's tiles pass under
-          // its menu bar. Each item measures the same for the whole key press.
+          // its menu bar. Nor is a row's own button laid over a tile: Prime Video's last tile in a row lies under its
+          // "next 4 titles" once slid near the end, and was left out (2026-11-21). Each item measures the same for the
+          // whole key press.
           const items = (root) => {
             const all = [];
             for (const e of root.querySelectorAll(PICK)) if (usable(e)) all.push({ e, r: face(e).getBoundingClientRect() });
             const behind = (a, b) => a !== b && !a.e.contains(b.e) && b.r.left >= a.r.left && b.r.right <= a.r.right
               && b.r.top >= a.r.top && b.r.bottom <= a.r.bottom && b.r.width * b.r.height * 2 < a.r.width * a.r.height
-              && (b.pinned ??= pinned(b.e)) === (a.pinned ??= pinned(a.e));
+              && (b.pinned ??= pinned(b.e)) === (a.pinned ??= pinned(a.e)) && !overRow(b.e, a.e);
             return all.filter(a => a.e.getAttribute('tabindex') !== '-1' || !all.some(b => behind(a, b)));
           };
           // Cut out of sight by a parent that clips (a hidden slide). A parent that scrolls does not count: the next
@@ -265,7 +267,7 @@ internal static class PageScripts
           // Netflix's "See previous titles" and "See more titles" (2026-11-21). Focus alone leaves a tile past the edge
           // out of sight there (measured), and a click on the button slides the row a page. For a tile the row cuts
           // or hides on the side pressed (dir 1 right, -1 left), the button: one inside a box that clips the tile on
-          // that side, level with the tile, at that end of the box, and measuring something (Netflix's left one
+          // that side, level with the tile, wholly at that end of the box, and measuring something (Netflix's left one
           // measures nothing while no tile lies before the first). Null when there is none. A scroll arrow tied to a
           // region (aria-controls, Disney+'s) is not one: Disney+'s banner keeps its hidden slides out of reach.
           const pager = (e, dir) => {
@@ -278,10 +280,23 @@ internal static class PageScripts
                 if (b.tagName !== 'BUTTON' || b.disabled || b.contains(e) || scrollArrow(b)) continue;
                 const k = b.getBoundingClientRect();
                 if (k.width < 4 || k.height < 4 || k.bottom <= r.top || k.top >= r.bottom) continue;
-                if (dir > 0 ? k.right >= q.right - 150 && k.left > q.left + q.width / 2 : k.left <= q.left + 150 && k.right < q.left + q.width / 2) return b;
+                // Wholly inside the box, in its last 150 px: Prime Video's tiles each hold a button of their own, and
+                // the tile in focus a hover card reaching near the edge, all before the row's own (2026-11-21).
+                if (dir > 0 ? k.left >= q.right - 150 && k.right <= q.right + 1 : k.right <= q.left + 150 && k.left >= q.left - 1) return b;
               }
             }
             return null;
+          };
+          // A button laid over the row the item is in: level with a box that holds the item and not the button, and
+          // inside it from side to side. Buttons side by side (a title page's) lie beside each other's boxes, not over.
+          const overRow = (b, cur) => {
+            if (b.tagName !== 'BUTTON') return false;
+            const k = b.getBoundingClientRect();
+            for (let p = cur.parentElement, n = 0; p && p !== document.body && n < 8 && !p.contains(b); p = p.parentElement, n++) {
+              const q = p.getBoundingClientRect();
+              if (k.left >= q.left - 1 && k.right <= q.right + 1 && k.top < q.bottom && k.bottom > q.top) return true;
+            }
+            return false;
           };
           // A dialog the page marks modal and shows: the last one wins. Netflix's detail panel is one, and OK on a card
           // opens it with the focus left on the card behind, so the arrows moved between the cards under it
@@ -348,6 +363,11 @@ internal static class PageScripts
               const size = d[0] !== 0 ? c.width : c.height;
               found.push({ e, ahead: Math.max(ahead, 0), score: Math.max(ahead, 0) + off * 2 + centres / 10 + (1 - share) * size });
             }
+            // Along a row, a button laid over the row the item is in (over a box that holds the item, not the button)
+            // is the row's own, for a mouse, and never a target: the tile past it is, and pager presses the button for
+            // it. Prime Video's search results show "next 5 titles" over the row's edge, nearer than the tile it cuts,
+            // and the focus stopped on it with the row never sliding; at the row's end it stays (2026-11-21).
+            if (d[0] !== 0) for (let i = found.length - 1; i >= 0; i--) if (overRow(found[i].e, cur)) found.splice(i, 1);
             const to = rank(found, fromBar, d[0]);
             // Up and Down never pass a row of tabs, which switches what is shown under it: they stop on its selected
             // tab, as on a TV. From Prime Video's episodes, Up went to whichever of Episodes, Related and Details lay

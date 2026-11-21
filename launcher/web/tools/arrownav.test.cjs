@@ -1263,3 +1263,89 @@ test('netflix: Down never jumps to a card out of sight, and presses no row butto
   assert.equal(focused(p), 'Below');
   assert.equal(p.more.clicks, undefined);
 });
+
+// Prime Video's search results as measured on 2026-11-21 (1920 x 1080, "batman", signed in): a row of tiles (links,
+// 276 wide every 300) in a list that scrolls sideways inside a box that clips at the screen's edge, with the row's own
+// "previous 5 titles" and "next 5 titles" buttons at its ends, shown (opacity 1, tabindex 0). The left one measures
+// nothing while nothing lies before the first tile. A click on "next 5 titles" slides the row 1800 px, so the tile cut
+// by the right edge becomes the first.
+function primeSearch() {
+  const body = new El('body');
+  const doc = { body, documentElement: new El('html'), activeElement: body, fullscreenElement: null, querySelectorAll: (s) => body.querySelectorAll(s),
+    elementFromPoint: () => body };
+  doc.documentElement.add(body);
+  const names = ['Gotham Knights', 'Batman & Robin', 'The Killing Joke', 'Mask of the Phantasm', 'SubZero', 'Batman Beyond',
+    'Batman', 'Justice League', 'The Dark Knight Returns', 'The Long Halloween', 'Superman', 'Batwheels', 'Caped Crusader'];
+  const box = new El('div', {}, [0, 463, 1905, 155], { overflowX: 'hidden', overflowY: 'hidden' });
+  const list = new El('ul', { 'data-testid': 'card-container-list' }, [0, 463, 1905, 155], { overflowX: 'scroll', overflowY: 'auto' });
+  const tiles = names.map((n, i) => new El('a', { href: '/detail/' + i, 'aria-label': n }, [72 + i * 300, 463, 276, 155]));
+  // Each tile has a button of its own over it (opacity 0), and the tile in focus a hover card, a button wider than
+  // the tile (opacity 1), all before the row's own buttons in the page. Measured with Batman Beyond focused.
+  const items = [];
+  list.add(...tiles.map((t, i) => {
+    const own = new El('button', { 'aria-label': names[i] }, t.rect.slice(), { opacity: '0' });
+    items.push(own, t);
+    const li = new El('li', {}, t.rect.slice()).add(own, t);
+    if (i === 5) { const card = new El('button', { 'aria-label': names[i] }, [1417, 419, 431, 242]); items.push(card); li.add(card); }
+    return li;
+  }));
+  const prev = new El('button', { 'data-testid': 'left-arrow', 'aria-label': 'previous 5 titles', tabindex: -1 }, [0, 463, 0, 155]);
+  const more = new El('button', { 'data-testid': 'right-arrow', 'aria-label': 'next 5 titles', tabindex: 0 }, [1857, 463, 48, 155]);
+  const shift = (by) => {
+    for (const t of items) t.rect = [t.rect[0] + by, t.rect[1], t.rect[2], t.rect[3]];
+    const before = tiles[0].rect[0] < 0;
+    prev.rect = [0, 463, before ? 48 : 0, 155];
+    prev.attrs.tabindex = before ? 0 : -1;
+  };
+  more.click = function () { this.clicks = (this.clicks || 0) + 1; shift(-1800); };
+  prev.click = function () { this.clicks = (this.clicks || 0) + 1; shift(1800); };
+  box.add(list, prev, more);
+  body.add(box);
+  return run(doc, '/search/ref=atv_nb_sug', { tiles, prev, more });
+}
+
+test('prime search: Right onto the tile cut by the row\'s edge goes to the tile, not the row\'s "next 5 titles", and presses it', () => {
+  const p = primeSearch();
+  p.tiles[5].focus();   // Batman Beyond, the last tile wholly in sight
+  const ev = press(p, 'ArrowRight');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(focused(p), 'Batman', 'the next tile, though the button lies nearer');
+  assert.equal(p.more.clicks, 1, 'the row slid');
+  assert.equal(p.tiles[6].rect[0], 72, 'the cut tile is now the first');
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Justice League', 'and Right moves on along the row');
+  assert.equal(p.more.clicks, 1);
+});
+
+test('prime search: Left from the first tile after a slide goes to the tile before, not "previous 5 titles", and slides back', () => {
+  const p = primeSearch();
+  p.tiles[5].focus();
+  press(p, 'ArrowRight');
+  press(p, 'ArrowLeft');
+  assert.equal(focused(p), 'Batman Beyond');
+  assert.equal(p.prev.clicks, 1, '"previous 5 titles" slid it back');
+  assert.equal(p.tiles[5].rect[0], 1572);
+});
+
+test('prime search: Right from the last tile of the row stays put, never on "next 5 titles", and presses nothing', () => {
+  const p = primeSearch();
+  p.more.click();
+  p.more.click();   // the row at its end: the last tile wholly in sight, nothing after it, the button still shown
+  p.tiles[12].focus();
+  const ev = press(p, 'ArrowRight');
+  assert.ok(ev.prevented && ev.stopped);
+  assert.equal(focused(p), 'Caped Crusader');
+  assert.equal(p.more.clicks, 2);
+});
+
+test('prime search: Right reaches the last tile when it lies under "next 5 titles", and presses the button to show it', () => {
+  const p = primeSearch();
+  p.more.click();
+  for (const t of p.tiles) t.attrs.tabindex = -1;   // as Prime marks its tiles
+  // Slid so the last tile is cut by the edge with the button over it (measured: tile 1674 to 1950, button 1857 to 1905).
+  for (const t of p.tiles) t.rect = [t.rect[0] - 198, t.rect[1], t.rect[2], t.rect[3]];
+  p.tiles[11].focus();   // Batwheels, 1374 to 1650
+  press(p, 'ArrowRight');
+  assert.equal(focused(p), 'Caped Crusader', 'a tile is not a banner image behind the row\'s own button');
+  assert.equal(p.more.clicks, 2, 'the button slid the rest of the row in');
+});
