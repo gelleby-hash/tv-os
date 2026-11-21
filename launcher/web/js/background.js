@@ -27,6 +27,7 @@
     all[layerIn === 0 ? 1 : 0].style.opacity = '0';
     var s = scrim();
     if (s) s.classList.add('photo');
+    if (window.TVGlass) window.TVGlass.show(url);
   }
 
   // No photo to show: fade the photo layers out and the weather landscape underneath is what is left.
@@ -34,6 +35,7 @@
     ticket++;
     var s = scrim();
     if (s) s.classList.remove('photo');
+    if (window.TVGlass) window.TVGlass.clear();
     if (!element || layerIn < 0) return;
     var all = layers();
     for (var i = 0; i < all.length; i++) all[i].style.opacity = '0';

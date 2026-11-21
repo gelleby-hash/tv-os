@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.IO;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
@@ -38,6 +40,7 @@ public partial class MainWindow : Window
 
     private readonly LauncherConfig _config;
     private readonly TimingLog _timing;
+    private MetNorwayClient? _metNorway;
     private readonly bool _dev;
     private readonly Stopwatch _sinceStart = Stopwatch.StartNew();
 
@@ -62,6 +65,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _photoTimer;
     private DispatcherTimer? _focusTimer;
     private ForegroundProbe? _probe;
+    private NetworkWatcher? _network;
+    private WindowsNetworkSource? _networkSource;
     private IReadOnlyList<string>? _photoUrls;
     private bool _pageReady;
     private bool _exiting;
@@ -167,6 +172,11 @@ public partial class MainWindow : Window
             _bridge.WeatherOffChosen += () => RunLocation(() => location.ChooseOffAsync());
             _bridge.WindowsLocationChosen += () => RunLocation(() => location.ChooseWindowsAsync());
             _bridge.TurnOnRequested += OnTurnOnRequested;
+            _metNorway = new MetNorwayClient(
+                new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate },
+                Path.Combine(DataFolder, "metno-cache.json"),
+                TimeProvider.System);
+            _bridge.BackupRequested += place => _ = AnswerBackupAsync(place);
         }
         catch (Exception ex)
         {
@@ -204,8 +214,9 @@ public partial class MainWindow : Window
             PageSettings.For(_dev).ApplyTo(core.Settings);
             core.SetVirtualHostNameToFolderMapping(HomeHost, Path.Combine(AppContext.BaseDirectory, "web"), CoreWebView2HostResourceAccessKind.Deny);
             Directory.CreateDirectory(PhotosFolder);
-            // DenyCors: the home page may show the photos as images, nothing else may read them.
-            core.SetVirtualHostNameToFolderMapping(PhotosHost, PhotosFolder, CoreWebView2HostResourceAccessKind.DenyCors);
+            // Allow: the home page reads the photos' pixels to shade the glass by how bright each photo is, which needs
+            // CORS access. Only the home view has this mapping (the apps run in their own environments).
+            core.SetVirtualHostNameToFolderMapping(PhotosHost, PhotosFolder, CoreWebView2HostResourceAccessKind.Allow);
 
             // The home page is the only page this window ever shows.
             core.NewWindowRequested += (_, e) => e.Handled = true;
@@ -546,6 +557,7 @@ public partial class MainWindow : Window
         PostBoost();
         PostApps();
         PostPhotos();
+        PostNetwork();
         if (_location is { } location)
             RunLocation(location.RefreshAsync);
     }
@@ -691,6 +703,38 @@ public partial class MainWindow : Window
             Post(new { type = "backgrounds", urls = _photoUrls });
     }
 
+    // Windows raises its change on a thread-pool thread; the page is posted to from the window's thread.
+    private void PostNetwork()
+    {
+        _network ??= new NetworkWatcher(_networkSource = new WindowsNetworkSource(),
+            message => Dispatcher.InvokeAsync(() => Post(message)), _timing);
+        _network.PostCurrent();
+    }
+
+    // The fetch runs off the window's thread and the reply is posted from it. The log names the outcome, never the place.
+    private async Task AnswerBackupAsync(Coordinates place)
+    {
+        try
+        {
+            var result = await Task.Run(() => _metNorway!.GetAsync(place, CancellationToken.None));
+            _timing.Mark("weather backup: met norway " + result.Status);
+            if (result.Ok && result.RawJson is not null)
+            {
+                using var raw = JsonDocument.Parse(result.RawJson);
+                var reply = new { type = "weatherBackup", ok = true, raw = raw.RootElement.Clone(), fetchedAt = result.FetchedAtMs };
+                await Dispatcher.InvokeAsync(() => Post(reply));
+            }
+            else
+            {
+                await Dispatcher.InvokeAsync(() => Post(new { type = "weatherBackup", ok = false, status = result.Status }));
+            }
+        }
+        catch (Exception ex)
+        {
+            _timing.Mark("weather backup: failed: " + ex.Message);
+        }
+    }
+
     private void Post(object message)
     {
         try
@@ -810,6 +854,8 @@ public partial class MainWindow : Window
         _photoTimer?.Stop();
         _focusTimer?.Stop();
         _probe?.Dispose();
+        _network?.Dispose();
+        _networkSource?.Dispose();
         // The phone remote goes before the hook: a press already queued to this thread then finds no presser,
         // rather than reaching the shell with no hook (the Rii's Home is Browser Home, which opens a browser).
         _presser = null;

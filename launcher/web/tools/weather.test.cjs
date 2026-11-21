@@ -295,19 +295,22 @@ test('cache: the v1 key is ignored', () => {
   const W = weatherWith({ localStorage: { getItem: k => (k in store ? store[k] : null), setItem() {} } });
   assert.strictEqual(W.cached(here), null);
   store['tvhome.weather.v2'] = store['tvhome.weather.v1'];
-  assert.ok(W.cached(here), 'the v2 key is read');
+  assert.ok(W.cached(here), 'the v2 key is still read');
+  store['tvhome.weather.v3'] = store['tvhome.weather.v1'];
+  delete store['tvhome.weather.v2'];
+  assert.ok(W.cached(here), 'the v3 key is read');
 });
 
 test('cache: read only for the place it was stored for, to 2 decimals', async () => {
   const store = {};
   const W = weatherWith({ fetch: answering(rawWeather(3, false, 10)), localStorage: { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; } } });
   await W.fetch({ latitude: 55.9512, longitude: -3.1888 });
-  assert.deepEqual(JSON.parse(store['tvhome.weather.v2']).loc, { latitude: 55.95, longitude: -3.19 }, 'stored rounded');
+  assert.deepEqual(JSON.parse(store['tvhome.weather.v3']).loc, { latitude: 55.95, longitude: -3.19 }, 'stored rounded');
   assert.ok(W.cached({ latitude: 55.95, longitude: -3.19 }));
   assert.ok(W.cached({ latitude: 55.9499, longitude: -3.1901 }), 'the same place to 2 decimals');
   assert.strictEqual(W.cached({ latitude: 55.96, longitude: -3.19 }), null);
   assert.strictEqual(W.cached(), null, 'no place, no cache');
-  store['tvhome.weather.v2'] = JSON.stringify({ raw: rawWeather(3, false, 10), fetchedAt: Date.now() });
+  store['tvhome.weather.v3'] = JSON.stringify({ raw: rawWeather(3, false, 10), fetchedAt: Date.now() });
   assert.strictEqual(W.cached({ latitude: 55.95, longitude: -3.19 }), null, 'a cache without a place is not trusted');
 });
 
@@ -378,3 +381,56 @@ test('tiles: the Fahrenheit setting converts wind and dew point', async () => {
   assert.ok(all.includes('22 mph') && all.includes('Dew point 39°'), all);
 });
 
+
+test('the request asks hourly feels-like, wind and humidity', async () => {
+  let asked = '';
+  await weatherWith({ fetch: u => { asked = u; return answering(liveRaw())(); } }).fetch({ latitude: 1, longitude: 2 });
+  const hourly = asked.split('hourly=')[1].split('&')[0];
+  for (const f of ['apparent_temperature', 'wind_speed_10m', 'relative_humidity_2m']) assert.ok(hourly.split(',').includes(f), f);
+});
+
+// A forecast by hand: current says 20 degrees, the hours (from 03:00) say something else.
+function forecastBy(hourly) {
+  const base = new Date(2026, 10, 2, 3, 0).getTime();
+  return { fetchedAt: base, current: { temp: 20, feels: 18, humidity: 55, wind: 30, code: 0, isDay: true, cloud: 0.1, uv: 4, visibility: 9000 },
+    hourly: hourly.map((h, i) => Object.assign({ time: new Date(base + i * 3600e3) }, h)) };
+}
+const HOURS = [
+  { temp: 7, code: 61, isDay: false, feels: 5, wind: 14, humidity: 88 },
+  { temp: 8, code: 3, isDay: false, feels: null, wind: null, humidity: null },
+  { temp: 9, code: 2, isDay: true, feels: 8, wind: 16, humidity: 80 }
+];
+
+test('nowFor: a fresh forecast gives current', () => {
+  const W = weatherWith({}), w = forecastBy(HOURS);
+  assert.strictEqual(W.nowFor(w, w.fetchedAt + 3600e3), w.current, 'exactly an hour is still fresh');
+});
+
+test('nowFor: a 6 hour old forecast gives that hour\'s values over current\'s', () => {
+  const W = weatherWith({}), w = forecastBy(HOURS);
+  const n = W.nowFor(w, w.fetchedAt + 3600e3 + 1);
+  assert.equal(n.temp, 8);
+  assert.equal(n.code, 3);
+  assert.equal(n.isDay, false);
+  assert.strictEqual(n.feels, null, 'a null hour value is not the old one');
+  assert.strictEqual(n.wind, null);
+  assert.strictEqual(n.humidity, null);
+  assert.equal(n.uv, 4, 'what the hours do not carry stays current\'s');
+  const m = W.nowFor(w, w.fetchedAt + 2 * 3600e3 + 30 * 60e3);
+  assert.deepEqual([m.temp, m.code, m.isDay, m.feels, m.wind, m.humidity], [9, 2, true, 8, 16, 80]);
+  assert.equal(w.current.temp, 20, 'current is not changed');
+});
+
+test('nowFor: past the last saved hour gives the last one', () => {
+  const W = weatherWith({}), w = forecastBy(HOURS);
+  const n = W.nowFor(w, w.fetchedAt + 30 * 3600e3);
+  assert.equal(n.temp, 9);
+  assert.equal(n.feels, 8);
+});
+
+test('nowFor: an old entry without the new fields gives nulls', () => {
+  const W = weatherWith({}), w = forecastBy([{ temp: 7, code: 61, isDay: false }, { temp: 8, code: 3, isDay: false }]);
+  const n = W.nowFor(w, w.fetchedAt + 2 * 3600e3);
+  assert.equal(n.temp, 8);
+  assert.strictEqual(n.feels, null);
+});

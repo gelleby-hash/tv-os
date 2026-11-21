@@ -9,7 +9,7 @@ const { loadPage, fakeConfig, placeMessage, root } = require('./fake-page.cjs');
 
 // A clear morning: 9:00 on 2 November 2026, by the page's own clock.
 const NOW = new Date(2026, 10, 2, 9, 0, 0).getTime();
-const CACHE_KEY = 'tvhome.weather.v2';
+const CACHE_KEY = 'tvhome.weather.v3';
 
 // A raw Open-Meteo answer for that morning: clear sky, in daylight, seven days with sunrise at 07:00 and sunset at 17:00.
 function rawClear(temperature = 12) {
@@ -993,3 +993,256 @@ test('locationTurnOn off while the pop-up is already open (the automatic one) ad
   assert.equal(page.focused(), turnOnButton(page));
 });
 
+
+// A saved forecast fetched 6 hours before NOW, read while the network is down: the hour's own values, not the old "now".
+const DOWN = () => Promise.reject(new Error('offline'));
+function sixHoursOld(key) {
+  const raw = rawClear(12);
+  raw.current.temperature_2m = 20;
+  raw.current.apparent_temperature = 18;
+  raw.current.relative_humidity_2m = 55;
+  raw.current.wind_speed_10m = 30;
+  const n = raw.hourly.time.length;
+  raw.hourly.temperature_2m = raw.hourly.temperature_2m.map(() => 7);
+  raw.hourly.apparent_temperature = Array(n).fill(5);
+  raw.hourly.wind_speed_10m = Array(n).fill(14);
+  raw.hourly.relative_humidity_2m = Array(n).fill(88);
+  return { [key]: JSON.stringify({ raw, fetchedAt: NOW - 6 * 3600e3, loc: { latitude: 10, longitude: 20 } }) };
+}
+
+test('the card on a 6 hour old forecast shows the current hour and still says Updated HH:MM', async () => {
+  const page = await pageWith({ storage: sixHoursOld(CACHE_KEY), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '7\u00b0');
+  const details = page.$('wxDetails').innerHTML;
+  assert.ok(details.includes('Feels 5\u00b0') && details.includes('14 km/h') && details.includes('88%'), details);
+  assert.ok(/Updated 03:00/.test(details), details);
+});
+
+test('a v2 cache entry is still shown, with hyphens for what it lacks', async () => {
+  const seeded = sixHoursOld('tvhome.weather.v2');
+  const saved = JSON.parse(seeded['tvhome.weather.v2']);
+  saved.fetchedAt = NOW - 3 * 3600e3;
+  for (const k of ['apparent_temperature', 'wind_speed_10m', 'relative_humidity_2m']) delete saved.raw.hourly[k];
+  seeded['tvhome.weather.v2'] = JSON.stringify(saved);
+  const page = await pageWith({ storage: seeded, fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '7\u00b0');
+  const details = page.$('wxDetails').innerHTML;
+  assert.ok(details.includes('Feels -'), details);
+  assert.ok(details.includes('Humidity -'), details);
+});
+
+const netMsg = state => ({ type: 'net', state });
+
+// A fetch that always fails and counts its calls.
+function failingFetch() {
+  const urls = [];
+  const fn = url => { urls.push(url); return Promise.reject(new Error('offline')); };
+  fn.urls = urls;
+  return fn;
+}
+
+test('internet after local fetches at once, even inside the 2 minute wait', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  const before = page.fetch.urls.length;
+  assert.equal(before, 1);
+  page.deliver(netMsg('local'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, before, 'going offline fetches nothing');
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, before + 1);
+});
+
+test('internet after internet does not fetch', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(netMsg('internet'));
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, 1);
+});
+
+test('the first net message (internet) does not fetch', async () => {
+  const page = await pageWith({ fetch: failingFetch() });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.fetch.urls.length, 1);
+});
+
+// ---------- MET Norway as the backup source ----------
+const METNO = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'metno-london.json'), 'utf8'));
+const BACKUP_CONFIG = () => Object.assign(fakeConfig(), { weatherBackup: true });
+const backups = page => page.posted.filter(m => m.type === 'weatherBackup');
+// MET Norway answers with the place's coordinates as [longitude, latitude, altitude]; the fixture is London, so a reply is
+// made for the place the test asks about (10, 20 unless said).
+function backupReply(latitude = 10, longitude = 20, fetchedAt = NOW - 60e3) {
+  const raw = JSON.parse(JSON.stringify(METNO));
+  raw.geometry.coordinates = [longitude, latitude, 17];
+  return { type: 'weatherBackup', ok: true, raw, fetchedAt };
+}
+// Open-Meteo answering or failing as the test flips `up`.
+function switchableFetch() {
+  const fn = url => { fn.urls.push(url); return fn.up ? Promise.resolve({ ok: true, json: () => Promise.resolve(rawClear()) }) : Promise.reject(new Error('offline')); };
+  fn.urls = []; fn.up = false;
+  return fn;
+}
+function oldForecast(hours) {
+  return { [CACHE_KEY]: JSON.stringify({ raw: rawClear(12), fetchedAt: NOW - hours * 3600e3, loc: { latitude: 10, longitude: 20 } }) };
+}
+
+test('a failed fetch with a fresh forecast does not ask for the backup', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), storage: oldForecast(0.5), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(netMsg('internet'));
+  page.deliver(netMsg('local'));
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(backups(page).length, 0);
+});
+
+test('a failed fetch with a 2 hour old forecast asks once', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), storage: oldForecast(2), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.deepEqual(backups(page), [{ type: 'weatherBackup', latitude: 10, longitude: 20 }]);
+});
+
+test('a failed fetch with no forecast asks', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(backups(page).length, 1);
+});
+
+test('no ask when the config has no weatherBackup', async () => {
+  const page = await pageWith({ fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(backups(page).length, 0);
+});
+
+test('a failed ask changes nothing', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver({ type: 'weatherBackup', ok: false, status: 'wait' });
+  await page.settle();
+  assert.equal(page.$('weather').hidden, true);
+  assert.equal(page.storage[CACHE_KEY], undefined);
+});
+
+test('a backup reply shows the card and saves it as metno', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(backupReply());
+  await page.settle();
+  assert.equal(page.$('weather').hidden, false);
+  assert.equal(page.$('wxTemp').textContent, '8°');
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, 'metno');
+});
+
+test('a saved metno forecast is read back as metno', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(backupReply());
+  await page.settle();
+  const again = await pageWith({ config: BACKUP_CONFIG(), storage: { [CACHE_KEY]: page.storage[CACHE_KEY] }, fetch: DOWN });
+  again.deliver(placeMessage('config'));
+  await again.settle();
+  assert.equal(again.$('wxTemp').textContent, '8°');
+  again.$('weather').click();
+  assert.match(again.$('fcPlace').textContent, /Based on data from MET Norway/);
+});
+
+test('while metno is shown Open-Meteo is retried after 2 minutes and its success replaces it', async () => {
+  const fetch = switchableFetch();
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(backupReply());
+  await page.settle();
+  assert.equal(fetch.urls.length, 1);
+  fetch.up = true;
+  // The page's own timer never runs in the fake, so the internet coming back stands in for the passing minutes: Open-Meteo is
+  // asked again although a MET Norway forecast is on screen.
+  page.deliver(netMsg('local'));
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.ok(fetch.urls.length >= 2, 'Open-Meteo is tried again');
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, undefined);
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  page.$('weather').click();
+  assert.doesNotMatch(page.$('fcPlace').textContent, /MET Norway/);
+});
+
+test('Open-Meteo succeeding while a MET Norway ask is out keeps the Open-Meteo card when the reply lands', async () => {
+  const fetch = switchableFetch();
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  assert.equal(backups(page).length, 1);
+  fetch.up = true;
+  page.deliver(netMsg('local'));
+  page.deliver(netMsg('internet'));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  page.deliver(backupReply(10, 20, NOW + 1000));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, undefined);
+});
+
+test('a MET Norway reply with a fresh Open-Meteo forecast on screen is ignored', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), storage: oldForecast(0.5), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(backupReply(10, 20, NOW + 1000));
+  await page.settle();
+  assert.equal(page.$('wxTemp').textContent, '12°');
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, undefined);
+});
+
+test('a MET Norway reply for an earlier place is ignored and not saved under the new one', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(Object.assign(placeMessage('picked'), { latitude: 30, longitude: 40 }));
+  await page.settle();
+  assert.deepEqual(backups(page).map(m => m.latitude), [10, 30]);
+  page.deliver(backupReply(10, 20));
+  await page.settle();
+  assert.equal(page.$('weather').hidden, true);
+  assert.equal(page.storage[CACHE_KEY], undefined);
+  page.deliver(backupReply(30, 40));
+  await page.settle();
+  assert.equal(page.$('weather').hidden, false);
+  assert.equal(JSON.parse(page.storage[CACHE_KEY]).source, 'metno');
+});
+
+test('the forecast header says Updated HH:MM. Based on data from MET Norway only for metno', async () => {
+  const page = await pageWith({ config: BACKUP_CONFIG(), fetch: DOWN });
+  page.deliver(placeMessage('config'));
+  await page.settle();
+  page.deliver(backupReply());
+  await page.settle();
+  page.$('weather').click();
+  const t = new Date(NOW - 60e3), pad = n => (n < 10 ? '0' : '') + n;
+  assert.equal(page.$('fcPlace').textContent, 'Updated ' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '. Based on data from MET Norway');
+  const plain = await pageWith({ config: BACKUP_CONFIG(), storage: oldForecast(0.5), fetch: DOWN });
+  plain.deliver(placeMessage('config'));
+  await plain.settle();
+  plain.$('weather').click();
+  assert.doesNotMatch(plain.$('fcPlace').textContent, /MET Norway/);
+});

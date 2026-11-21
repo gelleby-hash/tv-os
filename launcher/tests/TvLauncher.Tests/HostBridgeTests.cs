@@ -165,6 +165,19 @@ public sealed class HostBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task WeatherBackup_message_raises_BackupRequested_with_rounded_place()
+    {
+        var asked = new List<Coordinates>();
+        _bridge.BackupRequested += asked.Add;
+
+        await _bridge.HandleAsync("""{"type":"weatherBackup","latitude":55.953,"longitude":-3.188}""");
+        await _bridge.HandleAsync("""{"type":"weatherBackup","latitude":91,"longitude":0}""");
+
+        Assert.Equal([new Coordinates(55.95, -3.19)], asked);
+        Assert.DoesNotContain(LogLines(), l => l.Contains("55.9") || l.Contains("3.18"));
+    }
+
+    [Fact]
     public async Task LocationOff_RaisesWeatherOffChosen()
     {
         var chosen = 0;
@@ -322,6 +335,26 @@ public sealed class HostBridgeTests : IDisposable
         await _bridge.HandleAsync(json);
 
         Assert.DoesNotContain(LogLines(), line => line.Contains("page key"));
+    }
+
+    [Fact]
+    public async Task Log_message_is_written_to_the_log()
+    {
+        await _bridge.HandleAsync("""{"type":"log","text":"glass: x"}""");
+
+        Assert.Contains(LogLines(), line => line.Split('\t')[1] == "glass: x");
+    }
+
+    [Fact]
+    public async Task Log_text_is_cut_to_200_characters_and_one_line()
+    {
+        // The JSON escape \n arrives as a real newline in the text.
+        var json = "{\"type\":\"log\",\"text\":\"" + new string('a', 100) + "\\n" + new string('b', 199) + "\"}";
+        await _bridge.HandleAsync(json);
+
+        var line = Assert.Single(LogLines(), l => l.Contains("aaaa")).Split('\t')[1];
+        Assert.Equal(200, line.Length);
+        Assert.Equal(' ', line[100]);
     }
 
     [Fact]

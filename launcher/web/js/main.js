@@ -14,7 +14,7 @@
   // is for ('' when there is no place), so an answer for a place the viewer has left is ignored.
   var place = null, weatherKey = '';
   var weather = null;
-  var weatherError = null, lastAttempt = 0;
+  var weatherError = null, lastAttempt = 0, backupFor = '';
   var allApps = [], shownApps = [];
   var ROW = window.TVRow;
   // The row picked up in the Apps panel to be moved (its app id), or null.
@@ -39,8 +39,8 @@
     var h = d.getHours() % 12 || 12;
     return h + (d.getHours() < 12 ? ' AM' : ' PM');
   }
-  function temp(c) { return Math.round(settings.unit === 'F' ? c * 9 / 5 + 32 : c) + '°'; }
-  function wind(k) { return settings.unit === 'F' ? Math.round(k * 0.621) + ' mph' : Math.round(k) + ' km/h'; }
+  function temp(c) { return c == null ? '-' : Math.round(settings.unit === 'F' ? c * 9 / 5 + 32 : c) + '°'; }
+  function wind(k) { return k == null ? '-' : settings.unit === 'F' ? Math.round(k * 0.621) + ' mph' : Math.round(k) + ' km/h'; }
   function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
   var dateFmt = new Intl.DateTimeFormat(settings.language, { weekday: 'long', day: 'numeric', month: 'long' });
   var dayFmt = new Intl.DateTimeFormat(settings.language, { weekday: 'short' });
@@ -87,7 +87,7 @@
 
     var sub = FALLBACK[p] ? tr(FALLBACK[p]) : '';
     if (weather) {
-      var d = W.describe(weather.current.code), dayish = p === 'morning' || p === 'afternoon';
+      var d = W.describe(W.nowFor(weather, Date.now()).code), dayish = p === 'morning' || p === 'afternoon';
       sub = tr(MOOD[d.kind][dayish ? 0 : 1]);
     }
     $('sub').textContent = sub;
@@ -147,7 +147,7 @@
       $('fcStars').setAttribute('hidden', '');
       return;
     }
-    var c = weather.current, d = W.describe(c.code), t = today(now) || weather.daily[0];
+    var c = W.nowFor(weather, Date.now()), d = W.describe(c.code), t = today(now) || weather.daily[0];
     applyLook(d.kind, c);
     $('wxIcon').innerHTML = I.weather(d.kind, c.isDay);
     $('wxTemp').textContent = temp(c.temp);
@@ -155,7 +155,7 @@
     $('wxHilo').textContent = t ? tr('H {high}   L {low}', { high: temp(t.max), low: temp(t.min) }) : '';
     var stale = Date.now() - weather.fetchedAt > 60 * 60e3;
     $('wxDetails').innerHTML = tr('Feels') + ' ' + temp(c.feels) + '<i></i>' + tr('Wind') + ' ' + wind(c.wind) + '<i></i>' + tr('Humidity') + ' ' +
-      Math.round(c.humidity) + '%' + (stale ? '<i></i>' + tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '');
+      (c.humidity == null ? '-' : Math.round(c.humidity) + '%') + (stale ? '<i></i>' + tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '');
     var hours = weather.hourly.filter(function (h) { return h.time > now; }).slice(0, 6);
     $('wxHours').innerHTML = hours.map(function (h) {
       var hd = W.describe(h.code);
@@ -165,9 +165,9 @@
   }
 
   function renderSky(now) {
-    var ph = phase(now), cur = weather ? weather.current : null;
+    var ph = phase(now), cur = weather ? W.nowFor(weather, Date.now()) : null;
     var d = cur ? W.describe(cur.code) : { kind: 'clear', intensity: 0 };
-    var cloud = cur ? cur.cloud : 0.1;
+    var cloud = cur && cur.cloud != null ? cur.cloud : 0.1;
     var key = [ph, Math.round(cloud * 10), d.kind, now.getDate()].join('|');
     if (key !== skyKey) {
       skyKey = key;
@@ -263,6 +263,7 @@
   function onHdrChange() {
     H.post({ type: 'hdr', on: hdrOn() });
     renderGrid();
+    if (window.TVGlass) window.TVGlass.remeasure();
     if (scope === $('home') && (!focused || !document.contains(focused))) focusEl(firstTile());
   }
 
@@ -270,19 +271,46 @@
   function refreshWeather(force) {
     if (!weatherKey) return;
     var age = weather ? Date.now() - weather.fetchedAt : Infinity;
-    var due = force || age > CFG.weatherRefreshMinutes * 60e3;
-    var backoff = weatherError ? 2 * 60e3 : 0;
+    var fromBackup = !!weather && weather.source === 'metno';
+    var due = force || fromBackup || age > CFG.weatherRefreshMinutes * 60e3;
+    // While MET Norway's forecast is shown Open-Meteo is tried again on the short rhythm, not the 15 minute refresh.
+    var backoff = weatherError || fromBackup ? 2 * 60e3 : 0;
     if (!due || Date.now() - lastAttempt < backoff) return;
     lastAttempt = Date.now();
     var asked = weatherKey;
     W.fetch(place).then(function (w) {
       if (asked !== weatherKey) return;
-      weather = w; weatherError = null; renderAll();
+      // Open-Meteo is back, so a MET Norway answer still on its way is no longer wanted.
+      weather = w; weatherError = null; backupFor = ''; renderAll();
     }).catch(function (e) {
       if (asked !== weatherKey) return;
       weatherError = e; renderWeather();
+      // A blip with a fresh forecast on screen changes nothing; with none, or one over an hour old, MET Norway's is asked for.
+      if (CFG.weatherBackup && (!weather || Date.now() - weather.fetchedAt > 3600e3)) {
+        var r = W.rounded(place);
+        backupFor = asked;
+        H.post({ type: 'weatherBackup', latitude: r.latitude, longitude: r.longitude });
+      }
     });
   }
+
+  // The host's answer with MET Norway's forecast. A failed ask changes nothing. An answer for a place no longer shown (its own
+  // coordinates say which place it is for), or one that arrives while a fresh Open-Meteo forecast is on screen, is dropped.
+  H.on('weatherBackup', function (msg) {
+    if (!msg || !msg.ok || !msg.raw || !weatherKey || backupFor !== weatherKey) return;
+    var c = msg.raw.geometry && msg.raw.geometry.coordinates, r = W.rounded(place);
+    if (!c || Math.abs(c[1] - r.latitude) > 0.01 || Math.abs(c[0] - r.longitude) > 0.01) return;
+    if (weather && weather.source !== 'metno' && Date.now() - weather.fetchedAt <= 3600e3) return;
+    var fetchedAt = typeof msg.fetchedAt === 'number' ? msg.fetchedAt : Date.now();
+    var w;
+    try { w = W.saveMetNorway(msg.raw, fetchedAt, place); } catch (e) { return; }
+    weather = w;
+    renderAll();
+    if (!$('forecast').hidden) renderForecast();
+  });
+
+  // When the internet comes back the weather is fetched at once, not after the refresh interval or the wait after a failure.
+  function refreshWeatherNow() { lastAttempt = 0; refreshWeather(true); }
 
   // ---------- forecast detail tiles ----------
   // A value the weather service did not give shows a hyphen, never a number made up for it.
@@ -338,7 +366,7 @@
   function row(label, value) { return '<div><span>' + tr(label) + '</span><b>' + value + '</b></div>'; }
 
   function forecastTiles(now) {
-    var days = weather.daily, c = weather.current, t = today(now) || days[0], next = days[days.indexOf(t) + 1];
+    var days = weather.daily, c = W.nowFor(weather, Date.now()), t = today(now) || days[0], next = days[days.indexOf(t) + 1];
     var uv = c.uv == null ? DASH : Math.round(c.uv);
     var peak = t.uvMax == null ? DASH : tr('Peak today {n}, {category}', { n: Math.round(t.uvMax), category: tr(W.uvCategory(t.uvMax)) });
     var mark = c.uv == null ? '' : '<i class="uvmark" style="left:' + pos(percent(c.uv, 11)) + '%"></i>';
@@ -365,7 +393,8 @@
   // ---------- overlays ----------
   function renderForecast() {
     var now = new Date();
-    $('fcPlace').textContent = weather ? tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) : '';
+    // MET Norway's terms ask for credit where its data, processed or not, is shown.
+    $('fcPlace').textContent = weather ? tr('Updated') + ' ' + fmtTime(new Date(weather.fetchedAt)) + (weather.source === 'metno' ? '. Based on data from MET Norway' : '') : '';
     if (!weather) { $('fcDays').innerHTML = '<div class="empty">' + tr('Weather is not available yet.') + '</div>'; $('fcTiles').innerHTML = ''; return; }
     var days = weather.daily, lo = Infinity, hi = -Infinity;
     days.forEach(function (d) { lo = Math.min(lo, d.min); hi = Math.max(hi, d.max); });
@@ -387,7 +416,7 @@
     $('ambTime').textContent = fmtTime(now);
     $('ambDate').textContent = dateFmt.format(now);
     if (weather && !weatherIsOff()) {
-      var c = weather.current, d = W.describe(c.code);
+      var c = W.nowFor(weather, Date.now()), d = W.describe(c.code);
       $('ambWx').innerHTML = I.weather(d.kind, c.isDay) + '<span>' + temp(c.temp) + '</span><em>' + esc(d.label) + '</em>';
     } else $('ambWx').innerHTML = '';
   }
@@ -761,6 +790,33 @@
       '<span class="btn-tip' + (pop ? ' pop' : '') + '">' + esc(boostLabel(on)) + '</span>';
     btn.setAttribute('aria-label', boostLabel(on));
   }
+  // The host's view of the connection: 'internet', 'local' (a network but no internet) or 'none'. The chip shows only
+  // when it has been wrong for 10 s and the page has been up for 60 s, so a start-up or a blip never flashes it.
+  // Timers, not the clock, so the page's own timing is the only thing that counts.
+  var netState = null, netWrongLong = false, netSettled = false, netTimer = 0;
+  function drawNetChip() {
+    var chip = document.getElementById('netChip');
+    var show = netSettled && netWrongLong && netState !== null && netState !== 'internet';
+    chip.hidden = !show;
+    if (show) document.getElementById('netChipText').textContent = netState === 'none' ? 'No network' : 'No internet';
+  }
+  setTimeout(function () { netSettled = true; drawNetChip(); }, 60e3);
+  window.TVNet = { state: function () { return netState; } };
+  H.on('net', function (msg) {
+    var state = msg.state;
+    if (state === netState) return;
+    var wasWrong = netState !== null && netState !== 'internet';
+    netState = state;
+    // From one wrong state to another the stretch goes on, so the chip stays and only its words change.
+    if (!(wasWrong && state !== 'internet')) {
+      clearTimeout(netTimer);
+      netWrongLong = false;
+      if (state !== 'internet') netTimer = setTimeout(function () { netWrongLong = true; drawNetChip(); }, 10e3);
+    }
+    drawNetChip();
+    if (wasWrong && state === 'internet') refreshWeatherNow();
+  });
+
   H.on('boost', function (msg) {
     var on = boostOn = !!msg.on, btn = document.querySelector('[data-action="boost"]');
     btn.classList.toggle('on', on);
